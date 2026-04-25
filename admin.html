@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Mr Vape Shop Admin</title>
+  <link rel="stylesheet" href="./styles-v3.css" />
+</head>
+<body data-page="admin">
+  <div class="admin-app">
+    <aside class="sidebar">
+      <div class="sidebar-logo">MR VAPE SHOP ADMIN</div>
+      <a href="./index.html" class="side-link">← Customer Page</a>
+      <button class="side-link active admin-tab-btn" type="button" data-tab="products">Products</button>
+      <button class="side-link admin-tab-btn" type="button" data-tab="orders">Orders</button>
+      <button class="side-link admin-tab-btn" type="button" data-tab="customers">Customers</button>
+      <button class="side-link admin-tab-btn" type="button" data-tab="messages">Messages</button>
+    </aside>
+
+    <main class="admin-main">
+      <section class="admin-top">
+        <div>
+          <h1>Inventory Dashboard</h1>
+          <p>Firebase-connected admin panel with local fallback. Use on Netlify for full online sync.</p>
+        </div>
+        <div class="top-actions-wrap">
+          <button class="btn ghost" id="switchLocalBtn">Use Local Mode</button>
+          <button class="btn ghost" id="switchFirebaseBtn">Use Firebase Mode</button>
+          <button class="btn ghost" id="seedBtn">Seed Demo Products</button>
+          <button class="btn dark" id="resetBtn">Reset Local Data</button>
+        </div>
+      </section>
+
+      <section class="stats-grid">
+        <div class="stat-card"><span>Total Products</span><strong id="statProducts">0</strong></div>
+        <div class="stat-card"><span>Total Stock</span><strong id="statStock">0</strong></div>
+        <div class="stat-card"><span>Low Stock</span><strong id="statLow">0</strong></div>
+        <div class="stat-card"><span>Categories</span><strong id="statCategories">0</strong></div>
+      </section>
+
+      <div id="tab-products" class="admin-tab-panel">
+        <section class="panel">
+          <div class="panel-head">
+            <h2>Store Promo</h2>
+            <p>Already shown on the customer page</p>
+          </div>
+          <div class="notes">
+            <p><strong>🔥 Premium Vape Deals Ready to Use 🔥</strong></p>
+            <p><strong>Pods, devices, juice, batteries, and accessories</strong></p>
+            <p><strong>X-Black bundle promo ₱750 only</strong></p>
+          </div>
+        </section>
+
+        <section class="admin-grid">
+          <div class="panel">
+            <div class="panel-head">
+              <h2>Add / Edit Product</h2>
+              <p>Saved to Firebase in live mode, or browser storage in local mode.</p>
+            </div>
+
+            <form id="productForm" class="admin-form">
+              <input type="hidden" id="docId" />
+              <div class="form-grid">
+                <label>Product Name<input id="name" required placeholder="X-Black V2 Pod" /></label>
+                <label>Brand<input id="brand" required placeholder="MR VAPE SHOP" /></label>
+                <label>Category
+                  <select id="category" required>
+                    <option value="Pods">Pods</option>
+                    <option value="Devices">Devices</option>
+                    <option value="E-Juice">E-Juice</option>
+                    <option value="Battery">Battery</option>
+                    <option value="Accessories">Accessories</option>
+                    <option value="Promo">Promo</option>
+                  </select>
+                </label>
+                <label>Price<input id="price" type="number" min="0" required placeholder="450" /></label>
+                <label>Old Price<input id="oldPrice" type="number" min="0" required placeholder="500" /></label>
+                <label>Stock<input id="stock" type="number" min="0" required placeholder="20" /></label>
+                <label>Sold Text<input id="sold" placeholder="120+ sold" /></label>
+                <label>Badge<input id="badge" placeholder="8 Flavors" /></label>
+              </div>
+
+              <label>Main Image URL<input id="image" required placeholder="https://..." /></label>
+              <label>Gallery Image 2<input id="image2" placeholder="https://..." /></label>
+              <label>Gallery Image 3<input id="image3" placeholder="https://..." /></label>
+              <label>Gallery Image 4<input id="image4" placeholder="https://..." /></label>
+
+              <div class="form-actions">
+                <button type="submit" class="btn dark">Save Product</button>
+                <button type="button" class="btn ghost" id="clearFormBtn">Clear</button>
+              </div>
+            </form>
+          </div>
+
+          <div class="panel">
+            <div class="panel-head">
+              <h2>Product List</h2>
+              <p id="adminSourceLabel">Loading...</p>
+            </div>
+            <div class="table-wrap">
+              <table class="admin-table">
+                <thead>
+                  <tr><th>Product</th><th>Category</th><th>Price</th><th>Stock</th><th>Action</th></tr>
+                </thead>
+                <tbody id="adminProductTable"></tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+      </div>
+
+      <div id="tab-orders" class="admin-tab-panel hidden">
+        <section class="panel">
+          <div class="panel-head">
+            <h2>Orders</h2>
+            <p>Active customer orders appear here.</p>
+          </div>
+          <div class="table-wrap">
+            <table class="admin-table">
+              <thead>
+                <tr><th>Order ID</th><th>Customer</th><th>Total</th><th>Status</th><th>Items</th><th>Action</th></tr>
+              </thead>
+              <tbody id="ordersTable"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <h2>Order History</h2>
+            <p>Completed or moved orders transfer here automatically.</p>
+          </div>
+          <div class="table-wrap">
+            <table class="admin-table">
+              <thead>
+                <tr><th>Order ID</th><th>Customer</th><th>Total</th><th>Final Status</th><th>Items</th></tr>
+              </thead>
+              <tbody id="historyTable"></tbody>
+            </table>
+          </div>
+        </section>
+      </div>
+
+      <div id="tab-customers" class="admin-tab-panel hidden">
+        <section class="panel">
+          <div class="panel-head">
+            <h2>Customers</h2>
+            <p>Customer profiles saved from the customer page will appear here.</p>
+          </div>
+          <div class="table-wrap">
+            <table class="admin-table">
+              <thead>
+                <tr><th>Name</th><th>Phone</th><th>Email</th><th>Address</th></tr>
+              </thead>
+              <tbody id="customersTable"></tbody>
+            </table>
+          </div>
+        </section>
+      </div>
+    
+      
+      <div id="tab-messages" class="admin-tab-panel hidden">
+        <section class="panel">
+          <div class="panel-head">
+            <h2>Messages</h2>
+            <p>Messenger-style vape shop chat for admin.</p>
+          </div>
+          <div class="admin-messenger">
+            <div class="admin-conversation-list" id="messagesList"></div>
+            <div class="admin-conversation-panel">
+              <div class="admin-conversation-header" id="adminConversationHeader">Select a conversation</div>
+              <div class="admin-chat-window" id="adminChatWindow"></div>
+              <div class="admin-compose">
+                <textarea id="adminReplyText" placeholder="Type your reply to the customer here..."></textarea>
+                <div class="chat-upload-row">
+                  <label class="upload-chip" for="adminReplyImage">📷 Add Image</label>
+                  <input id="adminReplyImage" class="hidden-file-input" type="file" accept="image/*" />
+                  <span class="upload-file-name" id="adminReplyImageName">No image selected</span>
+                </div>
+                <div class="chat-image-preview hidden" id="adminReplyImagePreviewWrap">
+                  <img id="adminReplyImagePreview" alt="Admin selected image preview" />
+                  <button class="mini-remove-btn" id="removeAdminReplyImageBtn" type="button">Remove</button>
+                </div>
+                <div class="admin-compose-actions">
+                  <select id="adminMessageStatus" class="order-status-select">
+                    <option value="New">New</option>
+                    <option value="Replied">Replied</option>
+                  </select>
+                  <button class="btn dark" id="sendAdminReplyBtn">Send Reply</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+      </div>
+
+
+    </main>
+  </div>
+
+  <div class="notice" id="notice"></div>
+
+  <script type="module" src="./app-v3.js"></script>
+</body>
+</html>

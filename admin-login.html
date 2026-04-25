@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Mr Vape Shop Admin Login</title>
+  <link rel="stylesheet" href="./styles-v3.css" />
+</head>
+<body>
+  <div class="login-page">
+    <div class="login-card">
+      <div class="login-brand">MR VAPE SHOP ADMIN</div>
+      <h1>Admin Login</h1>
+      <p class="login-sub">Sign in with your authorized admin account.</p>
+      <form id="adminLoginForm" class="login-form">
+        <label>Email<input id="loginEmail" type="email" placeholder="admin@email.com" required /></label>
+        <label>Password<input id="loginPassword" type="password" placeholder="Enter password" required /></label>
+        <button type="submit" class="btn dark full-btn">Sign In</button>
+      </form>
+      <div class="notes"><p><strong>Important:</strong> Enable Email/Password sign-in in Firebase Authentication first.</p></div>
+      <a href="./index.html" class="btn ghost full-btn login-back">Back to Customer Page</a>
+    </div>
+  </div>
+  <div class="notice" id="notice"></div>
+  <script type="module" src="./app-v3.js"></script>
+</body>
+</html>
