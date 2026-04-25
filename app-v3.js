@@ -536,6 +536,14 @@ function initShop(){
         btn.classList.add("active");
         selectedSize = btn.dataset.size;
         $("selectedSizeLabel").textContent = "Selected: " + selectedSize;
+        const variantImage = btn.dataset.image || "";
+        if(variantImage){
+          const main = $("productPageMainImage");
+          if(main) main.src = variantImage;
+          document.querySelectorAll(".product-thumb").forEach(t => t.classList.remove("active"));
+          const matchingThumb = Array.from(document.querySelectorAll(".product-thumb")).find(t => t.dataset.image === variantImage);
+          if(matchingThumb) matchingThumb.classList.add("active");
+        }
       };
     });
   }
@@ -548,12 +556,15 @@ function initShop(){
     selectedSize = null;
     detailQty = 1;
 
-    const galleryImages = (Array.isArray(p.images) && p.images.length ? p.images : [firstProductImage(p)]).map(x => String(x || "").trim()).filter(Boolean);
+    const variantImageMap = (p.variantImages && typeof p.variantImages === "object") ? p.variantImages : {};
+    const variantGalleryImages = Object.values(variantImageMap).map(x => String(x || "").trim()).filter(Boolean);
+    const productImages = (Array.isArray(p.images) && p.images.length ? p.images : [firstProductImage(p)]).map(x => String(x || "").trim()).filter(Boolean);
+    const galleryImages = Array.from(new Set(variantGalleryImages.concat(productImages))).filter(Boolean);
     $("productPageMainImage").src = galleryImages[0] || firstProductImage(p);
     $("productPageBadge").textContent = p.badge || "New";
     const productThumbs = $("productThumbs");
     if(productThumbs){
-      productThumbs.innerHTML = galleryImages.map((img, i) => '<button class="product-thumb ' + (i === 0 ? 'active' : '') + '" type="button" data-gallery-index="' + i + '"><img src="' + escapeHtml(img) + '" alt="Product photo ' + (i+1) + '"></button>').join("");
+      productThumbs.innerHTML = galleryImages.map((img, i) => '<button class="product-thumb ' + (i === 0 ? 'active' : '') + '" type="button" data-gallery-index="' + i + '" data-image="' + escapeHtml(img) + '"><img src="' + escapeHtml(img) + '" alt="Product photo ' + (i+1) + '"></button>').join("");
     }
     $("productPageBrand").textContent = p.brand || "MR VAPE SHOP";
     $("productPageName").textContent = p.name || "";
@@ -582,7 +593,7 @@ function initShop(){
     if(variantDetail) variantDetail.textContent = variants.join(", ");
     const sizeGrid = $("sizeGrid");
     if(sizeGrid){
-      sizeGrid.innerHTML = variants.map(v => `<button class="size-option" type="button" data-size="${escapeHtml(v)}">${escapeHtml(v)}</button>`).join("");
+      sizeGrid.innerHTML = variants.map(v => `<button class="size-option" type="button" data-size="${escapeHtml(v)}" data-image="${escapeHtml(variantImageMap[v] || "")}">${escapeHtml(v)}${variantImageMap[v] ? '<span class="variant-has-photo">Photo</span>' : ''}</button>`).join("");
     }
     document.querySelectorAll(".size-option").forEach(btn => btn.classList.remove("active"));
     $("selectedSizeLabel").textContent = "No variant selected";
@@ -637,7 +648,7 @@ function initShop(){
       brand:selectedProduct.brand,
       category:selectedProduct.category,
       price:selectedProduct.price,
-      image:firstProductImage(selectedProduct),
+      image:(selectedProduct.variantImages && selectedProduct.variantImages[selectedSize]) ? selectedProduct.variantImages[selectedSize] : firstProductImage(selectedProduct),
       qty:detailQty,
       size:selectedSize
     });
@@ -990,8 +1001,8 @@ function initAdmin(){
     topActions.appendChild(logoutBtn);
   }
   function updateStats(items){ $("statProducts").textContent = items.length; $("statStock").textContent = items.reduce((a,b)=>a+Number(b.stock||0),0); $("statLow").textContent = items.filter(x=>Number(x.stock||0)<=10).length; $("statCategories").textContent = new Set(items.map(x=>x.category)).size; }
-  function clearForm(){ form.reset(); $("docId").value = ""; if($("variants")) $("variants").value = ""; if($("image")) $("image").value = ""; window.__pendingProductImages = [""]; setTimeout(() => window.hydrateProductImageRows && window.hydrateProductImageRows([""]), 0); }
-  function fillForm(item){ $("docId").value=item.id; $("name").value=item.name||""; $("brand").value=item.brand||""; $("category").value=item.category||"Pods"; $("price").value=item.price||0; $("oldPrice").value=item.oldPrice||0; $("stock").value=item.stock||0; $("sold").value=item.sold||""; $("badge").value=item.badge||""; if($("variants")) $("variants").value = Array.isArray(item.variants) ? item.variants.join("\n") : ""; const imgs = (Array.isArray(item.images) && item.images.length ? item.images : [item.image]).filter(Boolean); if($("image")) $("image").value = imgs[0] || ""; window.__pendingProductImages = imgs.length ? imgs : [""]; setTimeout(() => window.hydrateProductImageRows && window.hydrateProductImageRows(window.__pendingProductImages), 0); window.scrollTo({top:0, behavior:"smooth"}); }
+  function clearForm(){ form.reset(); $("docId").value = ""; if($("variants")) $("variants").value = ""; if($("variantImages")) $("variantImages").value = "{}"; if($("image")) $("image").value = ""; window.__pendingProductImages = [""]; setTimeout(() => { window.hydrateVariantRows && window.hydrateVariantRows(null); window.hydrateProductImageRows && window.hydrateProductImageRows([""]); }, 0); }
+  function fillForm(item){ $("docId").value=item.id; $("name").value=item.name||""; $("brand").value=item.brand||""; $("category").value=item.category||"Pods"; $("price").value=item.price||0; $("oldPrice").value=item.oldPrice||0; $("stock").value=item.stock||0; $("sold").value=item.sold||""; $("badge").value=item.badge||""; if($("variants")) $("variants").value = Array.isArray(item.variants) ? item.variants.join("\n") : ""; if($("variantImages")) $("variantImages").value = JSON.stringify(item.variantImages || {}); const variantImgs = item.variantImages && typeof item.variantImages === "object" ? Object.values(item.variantImages).filter(Boolean) : []; const allImgs = (Array.isArray(item.images) && item.images.length ? item.images : [item.image]).filter(Boolean); const extraImgs = allImgs.filter(img => !variantImgs.includes(img)); if($("image")) $("image").value = allImgs[0] || ""; window.__pendingProductImages = extraImgs.length ? extraImgs : [""]; setTimeout(() => { window.hydrateVariantRows && window.hydrateVariantRows(item); window.hydrateProductImageRows && window.hydrateProductImageRows(window.__pendingProductImages); }, 0); window.scrollTo({top:0, behavior:"smooth"}); }
   function renderProductsAdmin(items, source){ $("adminSourceLabel").textContent = source==="firebase" ? "Live from Firebase" : "Using local fallback"; updateStats(items); if(!items.length){ table.innerHTML = '<tr><td colspan="5" class="empty">No products found.</td></tr>'; return; } table.innerHTML = items.map(item => `<tr><td><div style="font-weight:800">${escapeHtml(item.name)}</div><div class="small">${escapeHtml(item.brand)}</div></td><td>${escapeHtml(item.category)}</td><td>${money(item.price)}</td><td>${Number(item.stock||0)}</td><td><div class="row-actions"><button class="btn ghost" data-edit="${item.id}">Edit</button><button class="btn dark" data-delete="${item.id}">Delete</button></div></td></tr>`).join(""); table.querySelectorAll("[data-edit]").forEach(btn => btn.onclick = () => { const item = items.find(x => x.id===btn.dataset.edit); if(item) fillForm(item); }); table.querySelectorAll("[data-delete]").forEach(btn => btn.onclick = async () => { try { await deleteProductItem(btn.dataset.delete); showNotice("Product deleted"); } catch { showNotice("Delete failed"); } }); }
   function renderOrders(activeOrders, historyOrders){ activeOrdersCache = activeOrders.slice(); const tbody = $("ordersTable"), historyBody = $("historyTable"); if(!tbody || !historyBody) return; if(!activeOrders.length) tbody.innerHTML = '<tr><td colspan="6" class="empty">No active orders yet.</td></tr>'; else { tbody.innerHTML = activeOrders.map(order => `<tr><td>${escapeHtml(order.id||"-")}</td><td><div style="font-weight:800">${escapeHtml(order.customer?.name||"-")}</div><div class="small">${escapeHtml(order.customer?.phone||"")}</div></td><td>${money(order.total||0)}</td><td><select class="order-status-select" data-order-status="${escapeHtml(order.id||"")}"><option value="Pending" ${order.status==="Pending"?"selected":""}>Pending</option><option value="Preparing" ${order.status==="Preparing"?"selected":""}>Preparing</option><option value="Ready" ${order.status==="Ready"?"selected":""}>Ready</option><option value="Completed" ${order.status==="Completed"?"selected":""}>Completed</option></select></td><td>${(order.items||[]).map(i => `${escapeHtml(i.name)} x${Number(i.qty)}`).join("<br>")}</td><td><button class="btn ghost" data-archive-order="${escapeHtml(order.id||"")}">Move to History</button></td></tr>`).join(""); tbody.querySelectorAll("[data-order-status]").forEach(select => select.onchange = async function(){ try { await updateOrderStatus(this.dataset.orderStatus, this.value, activeOrdersCache); showNotice(this.value==="Completed" ? "Order moved to history" : "Order status updated"); } catch { showNotice("Status update failed"); } }); tbody.querySelectorAll("[data-archive-order]").forEach(btn => btn.onclick = async () => { try { await moveOrderToHistory(btn.dataset.archiveOrder, activeOrdersCache); showNotice("Order moved to history"); } catch { showNotice("Move failed"); } }); } if(!historyOrders.length) historyBody.innerHTML = '<tr><td colspan="5" class="empty">No order history yet.</td></tr>'; else historyBody.innerHTML = historyOrders.map(order => `<tr><td>${escapeHtml(order.id||"-")}</td><td><div style="font-weight:800">${escapeHtml(order.customer?.name||"-")}</div><div class="small">${escapeHtml(order.customer?.phone||"")}</div></td><td>${money(order.total||0)}</td><td>${escapeHtml(order.status||"Completed")}</td><td>${(order.items||[]).map(i => `${escapeHtml(i.name)} x${Number(i.qty)}`).join("<br>")}</td></tr>`).join(""); }
 
@@ -1111,9 +1122,11 @@ function initAdmin(){
       stock:Number($("stock").value),
       sold:$("sold").value.trim() || "0 sold",
       badge:$("badge").value.trim() || "New",
-      variants:($("variants") ? $("variants").value.split(/\n|,/) : []).map(v => v.trim()).filter(Boolean),
-      image:(window.getProductImageUrls ? window.getProductImageUrls()[0] : $("image").value.trim()) || "",
-      images:(window.getProductImageUrls ? window.getProductImageUrls() : [$("image").value.trim()]).filter(Boolean)
+      variants:(window.getVariantData ? window.getVariantData().variants : ($("variants") ? $("variants").value.split(/\n|,/) : []).map(v => v.trim()).filter(Boolean)),
+      variantImages:(window.getVariantData ? window.getVariantData().variantImages : {}),
+      variantPhotoList:(window.getVariantData ? window.getVariantData().variantPhotoList : []),
+      image:(function(){ const vd = window.getVariantData ? window.getVariantData() : {variantPhotoList:[]}; const extra = window.getProductImageUrls ? window.getProductImageUrls() : [$("image").value.trim()]; return (vd.variantPhotoList[0]?.image || extra[0] || ""); })(),
+      images:(function(){ const vd = window.getVariantData ? window.getVariantData() : {variantPhotoList:[]}; const variantImgs = (vd.variantPhotoList || []).map(v => v.image).filter(Boolean); const extra = (window.getProductImageUrls ? window.getProductImageUrls() : [$("image").value.trim()]).filter(Boolean); return Array.from(new Set(variantImgs.concat(extra))); })()
     }; try { await saveProduct(payload, docId || null); clearForm(); showNotice("Product saved"); } catch { showNotice("Save failed"); } };
   $("clearFormBtn").onclick = clearForm;
   $("seedBtn").onclick = async () => { try { await seedProducts(); showNotice("Demo products added"); } catch (error) { showNotice(error.message || "Seed failed"); } };
@@ -1161,51 +1174,89 @@ document.addEventListener("keydown", (event) => {
   }
 });
 
-/* === Custom Variant Builder Upgrade === */
+/* === Custom Variant + Per-Variant Image Builder Upgrade === */
 (function(){
   function $(id){ return document.getElementById(id); }
-  function getRows(){ return Array.from(document.querySelectorAll('#variantRows .variant-row input')); }
-  function syncHiddenVariants(){
-    const hidden = $('variants');
-    if(!hidden) return [];
-    const values = getRows().map(i => (i.value || '').trim()).filter(Boolean);
-    hidden.value = values.join('\n');
-    return values;
+  function rows(){ return Array.from(document.querySelectorAll('#variantRows .variant-row')); }
+  function syncVariantData(){
+    const data = rows().map(row => {
+      const name = (row.querySelector('.variant-name')?.value || '').trim();
+      const image = (row.querySelector('.variant-image')?.value || '').trim();
+      return { name, image };
+    }).filter(v => v.name || v.image);
+    const names = data.map(v => v.name).filter(Boolean);
+    const imageMap = {};
+    data.forEach(v => { if(v.name && v.image) imageMap[v.name] = v.image; });
+    if($('variants')) $('variants').value = names.join('\n');
+    if($('variantImages')) $('variantImages').value = JSON.stringify(imageMap);
+    return { variants:names, variantImages:imageMap, variantPhotoList:data.filter(v => v.image) };
   }
-  function addVariantRow(value){
+  window.getVariantData = syncVariantData;
+
+  function addVariantRow(name, image){
     const wrap = $('variantRows');
     if(!wrap) return;
     const row = document.createElement('div');
-    row.className = 'variant-row';
-    row.innerHTML = '<input type="text" placeholder="Example: Black Wave / Gold / Blue Freeze" value=""><button type="button" aria-label="Remove variant">Remove</button>';
-    const input = row.querySelector('input');
-    input.value = value || '';
-    input.addEventListener('input', syncHiddenVariants);
-    row.querySelector('button').addEventListener('click', function(){ row.remove(); syncHiddenVariants(); });
+    row.className = 'variant-row variant-photo-row';
+    row.innerHTML = '<input class="variant-name" type="text" placeholder="Flavor / color name e.g. Black Wave" value=""><input class="variant-image" type="text" placeholder="Image URL for this flavor/color"><label class="image-upload-btn">Upload<input class="variant-file" type="file" accept="image/*" hidden></label><button type="button" aria-label="Remove variant">Remove</button>';
+    const nameInput = row.querySelector('.variant-name');
+    const imageInput = row.querySelector('.variant-image');
+    const fileInput = row.querySelector('.variant-file');
+    nameInput.value = name || '';
+    imageInput.value = image || '';
+    nameInput.addEventListener('input', syncVariantData);
+    imageInput.addEventListener('input', syncVariantData);
+    fileInput.addEventListener('change', async function(){
+      const picked = fileInput.files && fileInput.files[0];
+      if(!picked) return;
+      const oldValue = imageInput.value;
+      imageInput.value = 'Uploading image...';
+      try{
+        imageInput.value = await compressImageFile(picked, 900, 0.78);
+      }catch(err){
+        imageInput.value = oldValue || '';
+        showNotice('Image upload failed. Try a smaller photo or paste an image URL.');
+      }
+      syncVariantData();
+    });
+    row.querySelector('button').addEventListener('click', function(){
+      row.remove();
+      if(!rows().length) addVariantRow('', '');
+      syncVariantData();
+    });
     wrap.appendChild(row);
-    syncHiddenVariants();
+    syncVariantData();
   }
-  function hydrateVariantRows(){
+
+  function hydrateVariantRows(item){
     const wrap = $('variantRows');
+    if(!wrap) return;
     const hidden = $('variants');
-    if(!wrap || !hidden) return;
-    const values = (hidden.value || '').split(/\n|,/).map(v => v.trim()).filter(Boolean);
+    let names = [];
+    if(Array.isArray(item?.variants)) names = item.variants;
+    else if(hidden && hidden.value) names = hidden.value.split(/\n|,/).map(v => v.trim()).filter(Boolean);
+    const map = item?.variantImages && typeof item.variantImages === 'object' ? item.variantImages : {};
+    if(!names.length && Array.isArray(item?.variantPhotoList)) names = item.variantPhotoList.map(v => v.name).filter(Boolean);
     wrap.innerHTML = '';
-    (values.length ? values : ['']).forEach(addVariantRow);
-    syncHiddenVariants();
+    (names.length ? names : ['']).forEach(name => addVariantRow(name, map[name] || ''));
+    if(Array.isArray(item?.variantPhotoList)){
+      item.variantPhotoList.forEach(v => {
+        if(v && v.image && !rows().some(row => (row.querySelector('.variant-image')?.value || '') === v.image)) addVariantRow(v.name || '', v.image || '');
+      });
+    }
+    syncVariantData();
   }
+  window.hydrateVariantRows = hydrateVariantRows;
+
   window.addEventListener('DOMContentLoaded', function(){
     if(!$('variantRows')) return;
-    hydrateVariantRows();
+    hydrateVariantRows(null);
     const addBtn = $('addVariantRowBtn');
-    if(addBtn) addBtn.addEventListener('click', function(){ addVariantRow(''); const inputs=getRows(); inputs[inputs.length-1]?.focus(); });
+    if(addBtn) addBtn.addEventListener('click', function(){ addVariantRow('', ''); const last=rows().at(-1); last?.querySelector('.variant-name')?.focus(); });
     const form = $('productForm');
-    if(form) form.addEventListener('submit', syncHiddenVariants, true);
+    if(form) form.addEventListener('submit', syncVariantData, true);
     const clearBtn = $('clearFormBtn');
-    if(clearBtn) clearBtn.addEventListener('click', function(){ setTimeout(hydrateVariantRows, 0); });
-    document.addEventListener('click', function(e){
-      if(e.target && e.target.closest('[data-edit]')) setTimeout(hydrateVariantRows, 0);
-    }, true);
+    if(clearBtn) clearBtn.addEventListener('click', function(){ setTimeout(() => hydrateVariantRows(null), 0); });
   });
 })();
 
