@@ -1046,30 +1046,45 @@ function initAdmin(){
   function clearForm(){ form.reset(); $("docId").value = ""; if($("variants")) $("variants").value = ""; if($("variantImages")) $("variantImages").value = "{}"; if($("image")) $("image").value = ""; window.__pendingProductImages = [""]; setTimeout(() => { window.hydrateVariantRows && window.hydrateVariantRows(null); window.hydrateProductImageRows && window.hydrateProductImageRows([""]); }, 0); }
   function fillForm(item){ $("docId").value=item.id; $("name").value=item.name||""; $("brand").value=item.brand||""; $("category").value=item.category||"Pods"; $("price").value=item.price||0; $("oldPrice").value=item.oldPrice||0; $("stock").value=item.stock||0; $("sold").value=item.sold||""; $("badge").value=item.badge||""; if($("variants")) $("variants").value = Array.isArray(item.variants) ? item.variants.join("\n") : ""; if($("variantImages")) $("variantImages").value = JSON.stringify(item.variantImages || {}); const variantImgs = item.variantImages && typeof item.variantImages === "object" ? Object.values(item.variantImages).filter(Boolean) : []; const allImgs = (Array.isArray(item.images) && item.images.length ? item.images : [item.image]).filter(Boolean); const extraImgs = allImgs.filter(img => !variantImgs.includes(img)); if($("image")) $("image").value = allImgs[0] || ""; window.__pendingProductImages = extraImgs.length ? extraImgs : [""]; setTimeout(() => { window.hydrateVariantRows && window.hydrateVariantRows(item); window.hydrateProductImageRows && window.hydrateProductImageRows(window.__pendingProductImages); }, 0); window.scrollTo({top:0, behavior:"smooth"}); }
   function renderProductsAdmin(items, source){ $("adminSourceLabel").textContent = source==="firebase" ? "Live from Firebase" : "Using local fallback"; updateStats(items); if(!items.length){ table.innerHTML = '<tr><td colspan="5" class="empty">No products found.</td></tr>'; return; } table.innerHTML = items.map(item => `<tr><td><div style="font-weight:800">${escapeHtml(item.name)}</div><div class="small">${escapeHtml(item.brand)}</div></td><td>${escapeHtml(item.category)}</td><td>${money(item.price)}</td><td>${Number(item.stock||0)}</td><td><div class="row-actions"><button class="btn ghost" data-edit="${item.id}">Edit</button><button class="btn dark" data-delete="${item.id}">Delete</button></div></td></tr>`).join(""); table.querySelectorAll("[data-edit]").forEach(btn => btn.onclick = () => { const item = items.find(x => x.id===btn.dataset.edit); if(item) fillForm(item); }); table.querySelectorAll("[data-delete]").forEach(btn => btn.onclick = async () => { try { await deleteProductItem(btn.dataset.delete); showNotice("Product deleted"); } catch { showNotice("Delete failed"); } }); }
+  function receiptNumber(order){
+    if(order && order.receiptNo) return String(order.receiptNo);
+    const base = String((order && order.id) || Date.now()).replace(/[^a-zA-Z0-9]/g, "").slice(-7).toUpperCase();
+    const d = new Date();
+    const y = String(d.getFullYear()).slice(-2);
+    const m = String(d.getMonth()+1).padStart(2,"0");
+    const day = String(d.getDate()).padStart(2,"0");
+    return `MRV-${y}${m}${day}-${base}`;
+  }
+
   function printReceipt(order){
     if(!order){ showNotice("Order not found"); return; }
     const items = Array.isArray(order.items) ? order.items : [];
     const subtotal = items.reduce((sum, item) => sum + Number(item.price || 0) * Number(item.qty || 0), 0);
     const shipping = Math.max(0, Number(order.total || 0) - subtotal);
-    const dateText = new Date().toLocaleString();
-    const rowsHtml = items.map(item => `
+    const total = Number(order.total || subtotal + shipping || 0);
+    const cashReceived = Number(order.cashReceived || 0);
+    const change = Math.max(0, Number(order.change || (cashReceived ? cashReceived - total : 0)));
+    const dateText = order.paidAt && typeof order.paidAt === "string" ? new Date(order.paidAt).toLocaleString() : new Date().toLocaleString();
+    const receiptNo = receiptNumber(order);
+    const rowsHtml = items.map((item, index) => `
       <tr>
-        <td>${escapeHtml(item.name || "Item")}<br><small>${escapeHtml(item.size || item.variant || "")}</small></td>
-        <td style="text-align:center">${Number(item.qty || 0)}</td>
-        <td style="text-align:right">${money(item.price || 0)}</td>
-        <td style="text-align:right">${money(Number(item.price || 0) * Number(item.qty || 0))}</td>
+        <td class="num">${index + 1}</td>
+        <td class="item-name">${escapeHtml(item.name || "Item")}<br><span>${escapeHtml(item.size || item.variant || "Default")}</span></td>
+        <td class="qty">${Number(item.qty || 0)}</td>
+        <td class="money-cell">${money(item.price || 0)}</td>
+        <td class="money-cell">${money(Number(item.price || 0) * Number(item.qty || 0))}</td>
       </tr>
     `).join("");
-    const html = `<!doctype html><html><head><title>Receipt ${escapeHtml(order.id || "")}</title><style>
-      body{font-family:Arial,sans-serif;margin:0;padding:18px;color:#111;background:#fff}.receipt{max-width:320px;margin:auto}.center{text-align:center}.shop{font-size:18px;font-weight:900}.muted{font-size:12px;color:#555}hr{border:0;border-top:1px dashed #999;margin:12px 0}table{width:100%;border-collapse:collapse;font-size:12px}td,th{padding:6px 0;border-bottom:1px solid #eee;vertical-align:top}.total{font-size:18px;font-weight:900}.paid{font-size:14px;font-weight:900;border:2px solid #111;display:inline-block;padding:5px 12px;margin-top:8px}@media print{body{padding:0}.no-print{display:none}}
-    </style></head><body><div class="receipt">
-      <div class="center"><div class="shop">MR VAPE SHOP</div><div class="muted">Official POS Receipt</div><div class="paid">PAID</div></div><hr>
-      <div class="muted">Receipt: ${escapeHtml(order.id || "-")}<br>Date: ${escapeHtml(dateText)}<br>Customer: ${escapeHtml(order.customer?.name || "Walk-in Customer")}<br>Phone: ${escapeHtml(order.customer?.phone || "-")}</div><hr>
-      <table><thead><tr><th align="left">Item</th><th>Qty</th><th align="right">Price</th><th align="right">Total</th></tr></thead><tbody>${rowsHtml}</tbody></table><hr>
-      <table><tr><td>Subtotal</td><td style="text-align:right">${money(subtotal)}</td></tr><tr><td>Shipping/Fee</td><td style="text-align:right">${money(shipping)}</td></tr><tr><td class="total">TOTAL</td><td class="total" style="text-align:right">${money(order.total || 0)}</td></tr></table>
-      <hr><div class="center muted">Thank you for shopping with us!</div><br><button class="no-print" onclick="window.print()">Print Receipt</button>
-    </div><script>window.onload=function(){setTimeout(function(){window.print()},300)}<\/script></body></html>`;
-    const win = window.open("", "_blank", "width=420,height=700");
+    const html = `<!doctype html><html><head><title>Receipt ${escapeHtml(receiptNo)}</title><meta name="viewport" content="width=device-width,initial-scale=1"><style>
+      :root{--paper:80mm}*{box-sizing:border-box}body{font-family:Arial,Helvetica,sans-serif;margin:0;color:#111;background:#f3f4f6}.toolbar{position:sticky;top:0;background:#0b1220;color:white;padding:10px;display:flex;gap:8px;justify-content:center;flex-wrap:wrap}.toolbar button{border:0;border-radius:10px;padding:10px 12px;font-weight:800;cursor:pointer}.toolbar .primary{background:#111827;color:#fff;border:1px solid #374151}.toolbar .light{background:#fff;color:#111}.receipt{width:var(--paper);max-width:100%;margin:14px auto;background:#fff;padding:12px 10px;box-shadow:0 10px 30px rgba(0,0,0,.18)}.center{text-align:center}.shop{font-size:18px;font-weight:900;letter-spacing:.5px}.tag{font-size:11px;text-transform:uppercase;letter-spacing:1.2px}.muted{font-size:11px;color:#444;line-height:1.45}.paid{font-size:13px;font-weight:900;border:2px solid #111;display:inline-block;padding:5px 16px;margin:8px 0 2px;border-radius:999px}hr{border:0;border-top:1px dashed #777;margin:10px 0}table{width:100%;border-collapse:collapse;font-size:11px}th{font-size:10px;text-transform:uppercase;text-align:left;border-bottom:1px solid #111;padding:4px 0}td{padding:5px 0;border-bottom:1px dashed #ddd;vertical-align:top}.num{width:14px}.qty{text-align:center;width:22px}.money-cell{text-align:right;white-space:nowrap}.item-name span{font-size:10px;color:#555}.summary td{border:0;padding:3px 0}.summary .grand td{font-size:15px;font-weight:900;border-top:1px dashed #777;padding-top:7px}.barcode{font-family:"Courier New",monospace;font-size:12px;letter-spacing:2px;border:1px solid #111;padding:6px;margin:8px 0 2px;word-break:break-all}.footer{font-size:11px;line-height:1.5}.copy{font-size:10px;color:#666}@page{size:80mm auto;margin:4mm}@media print{body{background:#fff}.toolbar{display:none}.receipt{width:80mm;margin:0;box-shadow:none;padding:0 2mm}body.print-58 .receipt{width:58mm}@page{margin:2mm}}
+    </style></head><body><div class="toolbar no-print"><button class="primary" onclick="window.print()">🧾 Print Receipt</button><button class="light" onclick="document.body.classList.toggle('print-58');document.documentElement.style.setProperty('--paper',document.body.classList.contains('print-58')?'58mm':'80mm')">58mm / 80mm</button><button class="light" onclick="window.close()">Close</button></div><div class="receipt">
+      <div class="center"><div class="shop">MR VAPE SHOP</div><div class="tag">Official POS Receipt</div><div class="paid">PAID</div></div><hr>
+      <div class="muted"><strong>Receipt No:</strong> ${escapeHtml(receiptNo)}<br><strong>Order ID:</strong> ${escapeHtml(order.id || "-")}<br><strong>Date:</strong> ${escapeHtml(dateText)}<br><strong>Cashier:</strong> ${escapeHtml(order.cashier || "Admin POS")}<br><strong>Customer:</strong> ${escapeHtml(order.customer?.name || "Walk-in Customer")}<br><strong>Phone:</strong> ${escapeHtml(order.customer?.phone || "-")}</div><hr>
+      <table><thead><tr><th>#</th><th>Item</th><th>Qty</th><th style="text-align:right">Price</th><th style="text-align:right">Total</th></tr></thead><tbody>${rowsHtml}</tbody></table><hr>
+      <table class="summary"><tr><td>Subtotal</td><td class="money-cell">${money(subtotal)}</td></tr><tr><td>Shipping/Fee</td><td class="money-cell">${money(shipping)}</td></tr><tr><td>Payment</td><td class="money-cell">${escapeHtml(order.paymentMethod || "Cash")}</td></tr>${cashReceived ? `<tr><td>Cash Received</td><td class="money-cell">${money(cashReceived)}</td></tr><tr><td>Change</td><td class="money-cell">${money(change)}</td></tr>` : ""}<tr class="grand"><td>TOTAL</td><td class="money-cell">${money(total)}</td></tr></table>
+      <hr><div class="center"><div class="barcode">*${escapeHtml(receiptNo)}*</div><div class="footer">Thank you for shopping with us!<br>Please keep this receipt for reference.</div><div class="copy">Powered by MR VAPE SHOP POS</div></div>
+    </div><script>window.onload=function(){setTimeout(function(){window.print()},500)}<\/script></body></html>`;
+    const win = window.open("", "_blank", "width=430,height=760");
     if(!win){ showNotice("Popup blocked. Allow popups to print receipt."); return; }
     win.document.open(); win.document.write(html); win.document.close();
   }
@@ -1077,28 +1092,44 @@ function initAdmin(){
   async function payAndPrintOrder(orderId){
     const order = activeOrdersCache.find(x => x.id === orderId);
     if(!order){ showNotice("Order not found"); return; }
+    const total = Number(order.total || 0);
+    const paymentMethod = prompt("Payment method (Cash / GCash / Card):", order.paymentMethod || "Cash") || "Cash";
+    let cashReceived = "";
+    if(paymentMethod.toLowerCase().includes("cash")) cashReceived = prompt("Cash received:", String(total)) || String(total);
+    const paidData = {
+      status:"Paid",
+      receiptNo: receiptNumber(order),
+      paymentMethod,
+      cashReceived: Number(cashReceived || total),
+      change: Math.max(0, Number(cashReceived || total) - total),
+      cashier:"Admin POS"
+    };
     try{
-      if(getMode()==="firebase" && firebaseReady) await updateDoc(doc(db, "orders", orderId), { status:"Paid", paidAt:serverTimestamp() });
-      else { const orders = getLocalOrders(); const idx = orders.findIndex(o => o.id === orderId); if(idx >= 0){ orders[idx].status = "Paid"; orders[idx].paidAt = new Date().toISOString(); setLocalOrders(orders); } }
-      printReceipt({ ...order, status:"Paid" });
-      showNotice("Paid. Receipt ready to print");
+      if(getMode()==="firebase" && firebaseReady) await updateDoc(doc(db, "orders", orderId), { ...paidData, paidAt:serverTimestamp() });
+      else { const orders = getLocalOrders(); const idx = orders.findIndex(o => o.id === orderId); if(idx >= 0){ orders[idx] = { ...orders[idx], ...paidData, paidAt:new Date().toISOString() }; setLocalOrders(orders); } }
+      printReceipt({ ...order, ...paidData, paidAt:new Date().toISOString() });
+      showNotice("Paid. Professional receipt opened");
     }catch(error){ showNotice("Payment update failed"); }
   }
 
   function renderOrders(activeOrders, historyOrders){
     activeOrdersCache = activeOrders.slice();
+    const allOrdersForPrint = activeOrders.concat(historyOrders || []);
     const tbody = $("ordersTable"), historyBody = $("historyTable");
     if(!tbody || !historyBody) return;
     if(!activeOrders.length) tbody.innerHTML = '<tr><td colspan="6" class="empty">No active orders yet.</td></tr>';
     else {
-      tbody.innerHTML = activeOrders.map(order => `<tr><td>${escapeHtml(order.id||"-")}</td><td><div style="font-weight:800">${escapeHtml(order.customer?.name||"-")}</div><div class="small">${escapeHtml(order.customer?.phone||"")}</div></td><td>${money(order.total||0)}</td><td><select class="order-status-select" data-order-status="${escapeHtml(order.id||"")}"><option value="Pending" ${order.status==="Pending"?"selected":""}>Pending</option><option value="Preparing" ${order.status==="Preparing"?"selected":""}>Preparing</option><option value="Ready" ${order.status==="Ready"?"selected":""}>Ready</option><option value="Paid" ${order.status==="Paid"?"selected":""}>Paid</option><option value="Completed" ${order.status==="Completed"?"selected":""}>Completed</option></select></td><td>${(order.items||[]).map(i => `${escapeHtml(i.name)} x${Number(i.qty)}<br><span class="small">${escapeHtml(i.size || "")}</span>`).join("<br>")}</td><td><div class="row-actions"><button class="btn dark" data-pay-print="${escapeHtml(order.id||"")}">Paid + Print</button><button class="btn ghost" data-print-order="${escapeHtml(order.id||"")}">Print</button><button class="btn ghost" data-archive-order="${escapeHtml(order.id||"")}">Move to History</button></div></td></tr>`).join("");
+      tbody.innerHTML = activeOrders.map(order => `<tr><td><div style="font-weight:800">${escapeHtml(order.receiptNo || order.id || "-")}</div><div class="small">${escapeHtml(order.id||"")}</div></td><td><div style="font-weight:800">${escapeHtml(order.customer?.name||"-")}</div><div class="small">${escapeHtml(order.customer?.phone||"")}</div></td><td>${money(order.total||0)}</td><td><select class="order-status-select" data-order-status="${escapeHtml(order.id||"")}"><option value="Pending" ${order.status==="Pending"?"selected":""}>Pending</option><option value="Preparing" ${order.status==="Preparing"?"selected":""}>Preparing</option><option value="Ready" ${order.status==="Ready"?"selected":""}>Ready</option><option value="Paid" ${order.status==="Paid"?"selected":""}>Paid</option><option value="Completed" ${order.status==="Completed"?"selected":""}>Completed</option></select></td><td>${(order.items||[]).map(i => `${escapeHtml(i.name)} x${Number(i.qty)}<br><span class="small">${escapeHtml(i.size || "")}</span>`).join("<br>")}</td><td><div class="row-actions"><button class="btn dark" data-pay-print="${escapeHtml(order.id||"")}">Paid + Print</button><button class="btn ghost" data-print-order="${escapeHtml(order.id||"")}">Reprint</button><button class="btn ghost" data-archive-order="${escapeHtml(order.id||"")}">Move to History</button></div></td></tr>`).join("");
       tbody.querySelectorAll("[data-order-status]").forEach(select => select.onchange = async function(){ try { await updateOrderStatus(this.dataset.orderStatus, this.value, activeOrdersCache); showNotice(this.value==="Completed" ? "Order moved to history" : "Order status updated"); } catch { showNotice("Status update failed"); } });
       tbody.querySelectorAll("[data-pay-print]").forEach(btn => btn.onclick = async () => payAndPrintOrder(btn.dataset.payPrint));
-      tbody.querySelectorAll("[data-print-order]").forEach(btn => btn.onclick = () => printReceipt(activeOrdersCache.find(x => x.id === btn.dataset.printOrder)));
+      tbody.querySelectorAll("[data-print-order]").forEach(btn => btn.onclick = () => printReceipt(allOrdersForPrint.find(x => x.id === btn.dataset.printOrder)));
       tbody.querySelectorAll("[data-archive-order]").forEach(btn => btn.onclick = async () => { try { await moveOrderToHistory(btn.dataset.archiveOrder, activeOrdersCache); showNotice("Order moved to history"); } catch { showNotice("Move failed"); } });
     }
-    if(!historyOrders.length) historyBody.innerHTML = '<tr><td colspan="5" class="empty">No order history yet.</td></tr>';
-    else historyBody.innerHTML = historyOrders.map(order => `<tr><td>${escapeHtml(order.id||"-")}</td><td><div style="font-weight:800">${escapeHtml(order.customer?.name||"-")}</div><div class="small">${escapeHtml(order.customer?.phone||"")}</div></td><td>${money(order.total||0)}</td><td>${escapeHtml(order.status||"Completed")}</td><td>${(order.items||[]).map(i => `${escapeHtml(i.name)} x${Number(i.qty)}<br><span class="small">${escapeHtml(i.size || "")}</span>`).join("<br>")}</td></tr>`).join("");
+    if(!historyOrders.length) historyBody.innerHTML = '<tr><td colspan="6" class="empty">No order history yet.</td></tr>';
+    else {
+      historyBody.innerHTML = historyOrders.map(order => `<tr><td><div style="font-weight:800">${escapeHtml(order.receiptNo || order.id || "-")}</div><div class="small">${escapeHtml(order.id||"")}</div></td><td><div style="font-weight:800">${escapeHtml(order.customer?.name||"-")}</div><div class="small">${escapeHtml(order.customer?.phone||"")}</div></td><td>${money(order.total||0)}</td><td>${escapeHtml(order.status||"Completed")}</td><td>${(order.items||[]).map(i => `${escapeHtml(i.name)} x${Number(i.qty)}<br><span class="small">${escapeHtml(i.size || "")}</span>`).join("<br>")}</td><td><button class="btn ghost" data-history-print="${escapeHtml(order.id||"")}">Reprint</button></td></tr>`).join("");
+      historyBody.querySelectorAll("[data-history-print]").forEach(btn => btn.onclick = () => printReceipt(allOrdersForPrint.find(x => x.id === btn.dataset.historyPrint)));
+    }
   }
 
   function renderCustomers(customers){ const tbody = $("customersTable"); if(!tbody) return; if(!customers.length){ tbody.innerHTML = '<tr><td colspan="4" class="empty">No customers yet.</td></tr>'; return; } tbody.innerHTML = customers.map(customer => `<tr><td>${escapeHtml(customer.name||"-")}</td><td>${escapeHtml(customer.phone||"-")}</td><td>${escapeHtml(customer.email||"-")}</td><td>${escapeHtml(customer.address||"-")}</td></tr>`).join(""); }
