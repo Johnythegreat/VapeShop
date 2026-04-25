@@ -445,6 +445,11 @@ function initShop(){
     });
   }
 
+  function firstProductImage(p){
+    const imgs = Array.isArray(p?.images) ? p.images.map(x => String(x || "").trim()).filter(Boolean) : [];
+    return imgs[0] || String(p?.image || "").trim();
+  }
+
   function renderProducts(){
     const q = (searchInput.value || "").trim().toLowerCase();
     const filtered = products.filter(p => {
@@ -458,9 +463,13 @@ function initShop(){
       return;
     }
 
-    gridEl.innerHTML = filtered.map(p => `
+    gridEl.innerHTML = filtered.map(p => {
+      const cardImage = firstProductImage(p);
+      const safeImage = escapeHtml(cardImage);
+      return `
       <article class="card" data-view="${p.id}">
-        <div class="thumb" style="background-image:url('${p.image}')">
+        <div class="thumb ${cardImage ? "has-image" : "no-image"}">
+          ${cardImage ? `<img class="thumb-img" src="${safeImage}" alt="${escapeHtml((p.brand || "") + " " + (p.name || "Product"))}" loading="lazy" onerror="this.closest('.thumb').classList.add('no-image');this.remove();">` : `<div class="thumb-placeholder">MR VAPE SHOP</div>`}
           <div class="badge">${escapeHtml(p.badge || "New")}</div>
           <button class="fav js-notice" data-text="Wishlist feature can be added next">♡</button>
         </div>
@@ -481,7 +490,8 @@ function initShop(){
           </div>
         </div>
       </article>
-    `).join("");
+    `;
+    }).join("");
 
     bindNoticeButtons();
 
@@ -513,7 +523,7 @@ function initShop(){
       return;
     }
     if(existing) existing.qty += 1;
-    else cart.push({ id:p.id, name:p.name, brand:p.brand, category:p.category, price:p.price, image:p.image, qty:1, size:"M" });
+    else cart.push({ id:p.id, name:p.name, brand:p.brand, category:p.category, price:p.price, image:firstProductImage(p), qty:1, size:"M" });
     writeJSON(CART_KEY, cart);
     renderCart();
     showNotice("Added to cart");
@@ -538,8 +548,8 @@ function initShop(){
     selectedSize = null;
     detailQty = 1;
 
-    const galleryImages = (Array.isArray(p.images) && p.images.length ? p.images : [p.image]).filter(Boolean);
-    $("productPageMainImage").src = galleryImages[0] || p.image;
+    const galleryImages = (Array.isArray(p.images) && p.images.length ? p.images : [firstProductImage(p)]).map(x => String(x || "").trim()).filter(Boolean);
+    $("productPageMainImage").src = galleryImages[0] || firstProductImage(p);
     $("productPageBadge").textContent = p.badge || "New";
     const productThumbs = $("productThumbs");
     if(productThumbs){
@@ -561,7 +571,7 @@ function initShop(){
           productThumbs.querySelectorAll(".product-thumb").forEach(t => t.classList.remove("active"));
           thumb.classList.add("active");
           const i = Number(thumb.dataset.galleryIndex || 0);
-          $("productPageMainImage").src = galleryImages[i] || galleryImages[0] || p.image;
+          $("productPageMainImage").src = galleryImages[i] || galleryImages[0] || firstProductImage(p);
         };
       });
     }
@@ -627,7 +637,7 @@ function initShop(){
       brand:selectedProduct.brand,
       category:selectedProduct.category,
       price:selectedProduct.price,
-      image:selectedProduct.image,
+      image:firstProductImage(selectedProduct),
       qty:detailQty,
       size:selectedSize
     });
@@ -1215,10 +1225,25 @@ document.addEventListener("keydown", (event) => {
     if(!wrap) return;
     const row = document.createElement('div');
     row.className = 'image-row';
-    row.innerHTML = '<input type="url" placeholder="Paste image URL for product/flavor photo" value=""><button type="button" aria-label="Remove image">Remove</button>';
-    const input = row.querySelector('input');
+    row.innerHTML = '<input type="text" placeholder="Paste image URL or upload photo for product/flavor" value=""><label class="image-upload-btn">Upload<input type="file" accept="image/*" hidden></label><button type="button" aria-label="Remove image">Remove</button>';
+    const input = row.querySelector('input[type="text"]');
+    const file = row.querySelector('input[type="file"]');
     input.value = value || '';
     input.addEventListener('input', syncProductImages);
+    if(file){
+      file.addEventListener('change', async function(){
+        const picked = file.files && file.files[0];
+        if(!picked) return;
+        input.value = 'Uploading image...';
+        try{
+          input.value = await compressImageFile(picked, 900, 0.78);
+        }catch(err){
+          input.value = '';
+          showNotice('Image upload failed. Try a smaller photo or paste an image URL.');
+        }
+        syncProductImages();
+      });
+    }
     row.querySelector('button').addEventListener('click', function(){ row.remove(); if(!getImageInputs().length) addImageRow(''); syncProductImages(); });
     wrap.appendChild(row);
     syncProductImages();

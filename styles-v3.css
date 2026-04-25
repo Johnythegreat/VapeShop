@@ -720,3 +720,62 @@ html,body{background:radial-gradient(circle at top,#182033 0,#05070c 45%,#030407
 .image-row input{width:100%;background:#020617!important;color:#e5f7ff!important;border:1px solid rgba(125,249,255,.20)!important;border-radius:12px!important;padding:12px!important}
 .image-row button{background:#121a2b;color:#fff;border:1px solid rgba(255,255,255,.14);border-radius:12px;padding:10px 12px;font-weight:800;cursor:pointer}
 .image-row button:hover{border-color:#7df9ff;color:#7df9ff}
+
+/* === PRODUCT CARD IMAGE DISPLAY FIX + ADMIN PRODUCT PHOTO UPLOAD === */
+.thumb{
+  background:#050914 !important;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  overflow:hidden;
+}
+.thumb-img{
+  width:100%;
+  height:100%;
+  object-fit:cover;
+  display:block;
+}
+.thumb-placeholder{
+  width:100%;
+  height:100%;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  padding:18px;
+  text-align:center;
+  font-size:12px;
+  font-weight:900;
+  letter-spacing:2px;
+  color:#7df9ff;
+  background:radial-gradient(circle at top, rgba(125,249,255,.14), transparent 38%), #050914;
+  opacity:.9;
+}
+.image-row{
+  display:grid;
+  grid-template-columns:1fr auto auto;
+  gap:8px;
+  align-items:center;
+}
+.image-row input[type="text"]{
+  min-width:0;
+}
+.image-upload-btn,
+.image-row button{
+  border:1px solid rgba(125,249,255,.22);
+  border-radius:12px;
+  padding:11px 12px;
+  background:#0b1020;
+  color:#eaf8ff;
+  font-weight:800;
+  cursor:pointer;
+  white-space:nowrap;
+}
+.image-upload-btn:hover,
+.image-row button:hover{
+  border-color:#7df9ff;
+  box-shadow:0 0 14px rgba(125,249,255,.18);
+}
+@media(max-width:560px){
+  .image-row{grid-template-columns:1fr;}
+  .image-upload-btn,.image-row button{width:100%;text-align:center;}
+}
