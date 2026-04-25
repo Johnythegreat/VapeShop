@@ -802,3 +802,12 @@ html,body{background:radial-gradient(circle at top,#182033 0,#05070c 45%,#030407
   .variant-photo-row{grid-template-columns:1fr !important;}
   .variant-photo-row .image-upload-btn,.variant-photo-row button{width:100%;text-align:center;}
 }
+
+/* === Per-variant stock + POS receipt upgrade === */
+.variant-photo-row{grid-template-columns:1fr 110px 1.3fr auto auto !important;}
+.variant-stock{max-width:120px;}
+.variant-stock-pill{display:block;font-size:10px;margin-top:4px;color:#b7f7c8;font-weight:900;letter-spacing:.2px;}
+.size-option:disabled{opacity:.45;cursor:not-allowed;background:#111827 !important;color:#94a3b8 !important;border-color:rgba(255,255,255,.10) !important;}
+.order-status-select{background:#050914;color:#fff;border:1px solid rgba(125,249,255,.25);border-radius:10px;padding:8px;}
+.row-actions .btn{padding:8px 10px;font-size:12px;}
+@media(max-width:720px){.variant-photo-row{grid-template-columns:1fr !important}.variant-stock{max-width:none}}

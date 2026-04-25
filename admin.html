@@ -12,7 +12,7 @@
       <div class="sidebar-logo">MR VAPE SHOP ADMIN</div>
       <a href="./index.html" class="side-link">← Customer Page</a>
       <button class="side-link active admin-tab-btn" type="button" data-tab="products">Products</button>
-      <button class="side-link admin-tab-btn" type="button" data-tab="orders">Orders</button>
+      <button class="side-link admin-tab-btn" type="button" data-tab="orders">POS / Orders</button>
       <button class="side-link admin-tab-btn" type="button" data-tab="customers">Customers</button>
       <button class="side-link admin-tab-btn" type="button" data-tab="messages">Messages</button>
     </aside>
@@ -75,7 +75,7 @@
                 </label>
                 <label>Price<input id="price" type="number" min="0" required placeholder="450" /></label>
                 <label>Old Price<input id="oldPrice" type="number" min="0" required placeholder="500" /></label>
-                <label>Stock<input id="stock" type="number" min="0" required placeholder="20" /></label>
+                <label>Total Stock<input id="stock" type="number" min="0" required placeholder="Auto total from variants" /></label>
                 <label>Sold Text<input id="sold" placeholder="120+ sold" /></label>
                 <label>Badge<input id="badge" placeholder="8 Flavors" /></label>
               </div>
@@ -84,7 +84,7 @@
                 <div class="section-header">
                   <div class="section-text">
                     <strong>Variants / Flavors / Colors + Photo</strong>
-                    <p class="form-hint">Add each flavor/color with its own image. Customers can tap a variant and the matching photo will show in Product Details.</p>
+                    <p class="form-hint">Add each flavor/color with its own stock and image. Customer stock will follow the selected variant.</p>
                   </div>
                   <button class="btn ghost" type="button" id="addVariantRowBtn">+ Add Variant</button>
                 </div>
@@ -132,8 +132,8 @@
       <div id="tab-orders" class="admin-tab-panel hidden">
         <section class="panel">
           <div class="panel-head">
-            <h2>Orders</h2>
-            <p>Active customer orders appear here.</p>
+            <h2>POS / Orders</h2>
+            <p>After payment, click <strong>Paid + Print</strong> to mark paid and open the printable receipt.</p>
           </div>
           <div class="table-wrap">
             <table class="admin-table">

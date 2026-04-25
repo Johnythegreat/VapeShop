@@ -87,6 +87,13 @@ const readJSON = (k, f) => { try { const r = localStorage.getItem(k); return r ?
 const writeJSON = (k, v) => localStorage.setItem(k, JSON.stringify(v));
 const money = (v) => "₱" + Number(v || 0).toLocaleString();
 const totalAmount = (items) => items.reduce((s, i) => s + Number(i.price) * Number(i.qty), 0) + (items.length ? 60 : 0);
+const variantStockMap = (p) => (p && p.variantStocks && typeof p.variantStocks === "object") ? p.variantStocks : {};
+const getVariantStock = (p, variant) => {
+  const map = variantStockMap(p);
+  if(variant && Object.prototype.hasOwnProperty.call(map, variant)) return Number(map[variant] || 0);
+  return Number(p?.stock || 0);
+};
+const sumVariantStocks = (map) => Object.values(map || {}).reduce((sum, value) => sum + Number(value || 0), 0);
 const escapeHtml = (v) => String(v ?? "").replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;").replaceAll('"',"&quot;");
 function showNotice(text){ const el = $("notice"); if(!el) return; el.textContent = text; el.style.display = "block"; clearTimeout(window.__vapeNoticeTimer); window.__vapeNoticeTimer = setTimeout(() => el.style.display = "none", 2000); }
 function formatChatTime(value){ return escapeHtml(String(value || "").replace("T"," ").slice(0,16)); }
@@ -238,10 +245,21 @@ async function createOrder(cart, account){
       for(const item of cart){
         const ref = doc(db, "products", item.id); const snap = await transaction.get(ref);
         if(!snap.exists()) throw new Error(item.name + " not found");
-        const data = snap.data(); const stock = Number(data.stock || 0);
-        if(stock < Number(item.qty)) throw new Error("Not enough stock for " + item.name);
-        transaction.update(ref, { stock: stock - Number(item.qty) });
-        liveItems.push({ name:data.name, qty:Number(item.qty), price:Number(data.price), productId:item.id, size:item.size || "M" });
+        const data = snap.data();
+        const qty = Number(item.qty || 0);
+        const selectedVariant = item.size || item.variant || "Default";
+        const variantStocks = (data.variantStocks && typeof data.variantStocks === "object") ? { ...data.variantStocks } : {};
+        if(Object.keys(variantStocks).length && Object.prototype.hasOwnProperty.call(variantStocks, selectedVariant)){
+          const vStock = Number(variantStocks[selectedVariant] || 0);
+          if(vStock < qty) throw new Error("Not enough stock for " + item.name + " - " + selectedVariant);
+          variantStocks[selectedVariant] = vStock - qty;
+          transaction.update(ref, { variantStocks, stock: sumVariantStocks(variantStocks) });
+        } else {
+          const stock = Number(data.stock || 0);
+          if(stock < qty) throw new Error("Not enough stock for " + item.name);
+          transaction.update(ref, { stock: stock - qty });
+        }
+        liveItems.push({ name:data.name, qty, price:Number(data.price), productId:item.id, size:selectedVariant, image:item.image || "" });
       }
       const orderRef = doc(collection(db, "orders"));
       transaction.set(orderRef, { customer:account, items:liveItems, total:totalAmount(liveItems), status:"Pending", createdAt:serverTimestamp() });
@@ -249,8 +267,17 @@ async function createOrder(cart, account){
     return;
   }
   const products = getLocalProducts();
-  for(const item of cart){ const p = products.find(x => x.id === item.id); if(!p || Number(p.stock) < Number(item.qty)) throw new Error("Not enough stock for " + item.name); }
-  for(const item of cart){ const p = products.find(x => x.id === item.id); p.stock = Number(p.stock) - Number(item.qty); }
+  for(const item of cart){ const p = products.find(x => x.id === item.id); if(!p || getVariantStock(p, item.size) < Number(item.qty)) throw new Error("Not enough stock for " + item.name + (item.size ? " - " + item.size : "")); }
+  for(const item of cart){
+    const p = products.find(x => x.id === item.id);
+    const map = variantStockMap(p);
+    if(item.size && Object.prototype.hasOwnProperty.call(map, item.size)){
+      p.variantStocks = { ...map, [item.size]: Number(map[item.size] || 0) - Number(item.qty) };
+      p.stock = sumVariantStocks(p.variantStocks);
+    } else {
+      p.stock = Number(p.stock) - Number(item.qty);
+    }
+  }
   setLocalProducts(products);
   const orders = getLocalOrders();
   orders.unshift({ id:"ORD-" + Date.now(), customer:account, items:cart.map(i => ({ name:i.name, qty:Number(i.qty), price:Number(i.price), size:i.size || "M" })), total:totalAmount(cart), status:"Pending", createdAt:new Date().toISOString() });
@@ -516,14 +543,20 @@ function initShop(){
       showNotice("Product out of stock");
       return;
     }
-    const existing = cart.find(x => x.id === id && x.size === "M");
+    const variants = Array.isArray(p.variants) ? p.variants.filter(Boolean) : [];
+    if(variants.length){
+      openProductPage(id);
+      showNotice("Please choose a flavor/color");
+      return;
+    }
+    const existing = cart.find(x => x.id === id && x.size === "Default");
     const currentQty = existing ? Number(existing.qty) : 0;
     if(currentQty >= Number(p.stock || 0)){
       showNotice("No more stock available");
       return;
     }
     if(existing) existing.qty += 1;
-    else cart.push({ id:p.id, name:p.name, brand:p.brand, category:p.category, price:p.price, image:firstProductImage(p), qty:1, size:"M" });
+    else cart.push({ id:p.id, name:p.name, brand:p.brand, category:p.category, price:p.price, image:firstProductImage(p), qty:1, size:"Default" });
     writeJSON(CART_KEY, cart);
     renderCart();
     showNotice("Added to cart");
@@ -535,7 +568,10 @@ function initShop(){
         document.querySelectorAll(".size-option").forEach(b => b.classList.remove("active"));
         btn.classList.add("active");
         selectedSize = btn.dataset.size;
-        $("selectedSizeLabel").textContent = "Selected: " + selectedSize;
+        const selectedStock = getVariantStock(selectedProduct, selectedSize);
+        $("selectedSizeLabel").textContent = "Selected: " + selectedSize + " • Stock: " + selectedStock;
+        $("productPageStock").textContent = "Stock: " + selectedStock;
+        if(detailQty > selectedStock){ detailQty = Math.max(1, selectedStock); $("detailQtyValue").textContent = String(detailQty); updateDetailTotal(); }
         const variantImage = btn.dataset.image || "";
         if(variantImage){
           const main = $("productPageMainImage");
@@ -593,7 +629,10 @@ function initShop(){
     if(variantDetail) variantDetail.textContent = variants.join(", ");
     const sizeGrid = $("sizeGrid");
     if(sizeGrid){
-      sizeGrid.innerHTML = variants.map(v => `<button class="size-option" type="button" data-size="${escapeHtml(v)}" data-image="${escapeHtml(variantImageMap[v] || "")}">${escapeHtml(v)}${variantImageMap[v] ? '<span class="variant-has-photo">Photo</span>' : ''}</button>`).join("");
+      sizeGrid.innerHTML = variants.map(v => {
+        const vStock = getVariantStock(p, v);
+        return `<button class="size-option" type="button" data-size="${escapeHtml(v)}" data-image="${escapeHtml(variantImageMap[v] || "")}" ${vStock <= 0 ? "disabled" : ""}>${escapeHtml(v)}<span class="variant-stock-pill">${vStock > 0 ? vStock + " in stock" : "Out of stock"}</span>${variantImageMap[v] ? '<span class="variant-has-photo">Photo</span>' : ''}</button>`;
+      }).join("");
     }
     document.querySelectorAll(".size-option").forEach(btn => btn.classList.remove("active"));
     $("selectedSizeLabel").textContent = "No variant selected";
@@ -628,9 +667,9 @@ function initShop(){
       showNotice("Please select variant");
       return;
     }
-    const stock = Number(selectedProduct.stock || 0);
+    const stock = getVariantStock(selectedProduct, selectedSize);
     if(stock <= 0){
-      showNotice("Product out of stock");
+      showNotice("Selected variant is out of stock");
       return;
     }
 
@@ -667,8 +706,8 @@ function initShop(){
     const next = Number(cartItem.qty) + Number(delta);
     if(next <= 0){
       cart = cart.filter(x => !(x.id === id && x.size === size));
-    } else if(next > Number(live.stock || 0)){
-      showNotice("No more stock available");
+    } else if(next > getVariantStock(live, size)){
+      showNotice("No more stock available for this variant");
       return;
     } else {
       cartItem.qty = next;
@@ -972,12 +1011,15 @@ function initShop(){
     updateDetailTotal();
   };
   if($("detailQtyPlus")) $("detailQtyPlus").onclick = () => {
-    if(selectedProduct && detailQty < Number(selectedProduct.stock || 0)){
+    const maxStock = selectedProduct ? getVariantStock(selectedProduct, selectedSize) : 0;
+    if(selectedProduct && selectedSize && detailQty < maxStock){
       detailQty += 1;
       $("detailQtyValue").textContent = String(detailQty);
       updateDetailTotal();
+    } else if(!selectedSize) {
+      showNotice("Please select variant first");
     } else {
-      showNotice("No more stock available");
+      showNotice("No more stock available for this variant");
     }
   };
   if($("productPageAddToCartBtn")) $("productPageAddToCartBtn").onclick = addDetailToCart;
@@ -1004,97 +1046,60 @@ function initAdmin(){
   function clearForm(){ form.reset(); $("docId").value = ""; if($("variants")) $("variants").value = ""; if($("variantImages")) $("variantImages").value = "{}"; if($("image")) $("image").value = ""; window.__pendingProductImages = [""]; setTimeout(() => { window.hydrateVariantRows && window.hydrateVariantRows(null); window.hydrateProductImageRows && window.hydrateProductImageRows([""]); }, 0); }
   function fillForm(item){ $("docId").value=item.id; $("name").value=item.name||""; $("brand").value=item.brand||""; $("category").value=item.category||"Pods"; $("price").value=item.price||0; $("oldPrice").value=item.oldPrice||0; $("stock").value=item.stock||0; $("sold").value=item.sold||""; $("badge").value=item.badge||""; if($("variants")) $("variants").value = Array.isArray(item.variants) ? item.variants.join("\n") : ""; if($("variantImages")) $("variantImages").value = JSON.stringify(item.variantImages || {}); const variantImgs = item.variantImages && typeof item.variantImages === "object" ? Object.values(item.variantImages).filter(Boolean) : []; const allImgs = (Array.isArray(item.images) && item.images.length ? item.images : [item.image]).filter(Boolean); const extraImgs = allImgs.filter(img => !variantImgs.includes(img)); if($("image")) $("image").value = allImgs[0] || ""; window.__pendingProductImages = extraImgs.length ? extraImgs : [""]; setTimeout(() => { window.hydrateVariantRows && window.hydrateVariantRows(item); window.hydrateProductImageRows && window.hydrateProductImageRows(window.__pendingProductImages); }, 0); window.scrollTo({top:0, behavior:"smooth"}); }
   function renderProductsAdmin(items, source){ $("adminSourceLabel").textContent = source==="firebase" ? "Live from Firebase" : "Using local fallback"; updateStats(items); if(!items.length){ table.innerHTML = '<tr><td colspan="5" class="empty">No products found.</td></tr>'; return; } table.innerHTML = items.map(item => `<tr><td><div style="font-weight:800">${escapeHtml(item.name)}</div><div class="small">${escapeHtml(item.brand)}</div></td><td>${escapeHtml(item.category)}</td><td>${money(item.price)}</td><td>${Number(item.stock||0)}</td><td><div class="row-actions"><button class="btn ghost" data-edit="${item.id}">Edit</button><button class="btn dark" data-delete="${item.id}">Delete</button></div></td></tr>`).join(""); table.querySelectorAll("[data-edit]").forEach(btn => btn.onclick = () => { const item = items.find(x => x.id===btn.dataset.edit); if(item) fillForm(item); }); table.querySelectorAll("[data-delete]").forEach(btn => btn.onclick = async () => { try { await deleteProductItem(btn.dataset.delete); showNotice("Product deleted"); } catch { showNotice("Delete failed"); } }); }
-  function renderOrders(activeOrders, historyOrders){ activeOrdersCache = activeOrders.slice(); const tbody = $("ordersTable"), historyBody = $("historyTable"); if(!tbody || !historyBody) return; if(!activeOrders.length) tbody.innerHTML = '<tr><td colspan="6" class="empty">No active orders yet.</td></tr>'; else { tbody.innerHTML = activeOrders.map(order => `<tr><td>${escapeHtml(order.id||"-")}</td><td><div style="font-weight:800">${escapeHtml(order.customer?.name||"-")}</div><div class="small">${escapeHtml(order.customer?.phone||"")}</div></td><td>${money(order.total||0)}</td><td><select class="order-status-select" data-order-status="${escapeHtml(order.id||"")}"><option value="Pending" ${order.status==="Pending"?"selected":""}>Pending</option><option value="Preparing" ${order.status==="Preparing"?"selected":""}>Preparing</option><option value="Ready" ${order.status==="Ready"?"selected":""}>Ready</option><option value="Completed" ${order.status==="Completed"?"selected":""}>Completed</option></select></td><td>${(order.items||[]).map(i => `${escapeHtml(i.name)} x${Number(i.qty)}`).join("<br>")}</td><td><button class="btn ghost" data-archive-order="${escapeHtml(order.id||"")}">Move to History</button></td></tr>`).join(""); tbody.querySelectorAll("[data-order-status]").forEach(select => select.onchange = async function(){ try { await updateOrderStatus(this.dataset.orderStatus, this.value, activeOrdersCache); showNotice(this.value==="Completed" ? "Order moved to history" : "Order status updated"); } catch { showNotice("Status update failed"); } }); tbody.querySelectorAll("[data-archive-order]").forEach(btn => btn.onclick = async () => { try { await moveOrderToHistory(btn.dataset.archiveOrder, activeOrdersCache); showNotice("Order moved to history"); } catch { showNotice("Move failed"); } }); } if(!historyOrders.length) historyBody.innerHTML = '<tr><td colspan="5" class="empty">No order history yet.</td></tr>'; else historyBody.innerHTML = historyOrders.map(order => `<tr><td>${escapeHtml(order.id||"-")}</td><td><div style="font-weight:800">${escapeHtml(order.customer?.name||"-")}</div><div class="small">${escapeHtml(order.customer?.phone||"")}</div></td><td>${money(order.total||0)}</td><td>${escapeHtml(order.status||"Completed")}</td><td>${(order.items||[]).map(i => `${escapeHtml(i.name)} x${Number(i.qty)}`).join("<br>")}</td></tr>`).join(""); }
-
-  function renderMessages(messages){
-    const list = $("messagesList");
-    const header = $("adminConversationHeader");
-    const chat = $("adminChatWindow");
-    const replyText = $("adminReplyText");
-    const statusSel = $("adminMessageStatus");
-    const sendBtn = $("sendAdminReplyBtn");
-    if(!list || !header || !chat || !replyText || !statusSel || !sendBtn) return;
-
-    let selectedId = window.__adminSelectedMessageId;
-    if(!selectedId && messages.length) selectedId = messages[0].id;
-    const current = messages.find(m => m.id === selectedId) || messages[0] || null;
-    window.__adminSelectedMessageId = current?.id || null;
-
-    list.innerHTML = messages.length ? messages.map(item => {
-      const preview = item.latestMessage || item.message || "";
-      const isActive = item.id === window.__adminSelectedMessageId;
-      return `
-        <div class="admin-conversation-item ${isActive ? "active" : ""} ${item.status === "New" ? "unread" : ""}" data-open-message="${escapeHtml(item.id)}">
-          <div class="admin-conversation-name">${escapeHtml(item.name || "-")}${item.status === "New" ? '<span class="unread-badge">NEW</span>' : ''}</div>
-          <div class="small">${escapeHtml(item.phone || "-")}</div>
-          <div class="admin-conversation-preview">${escapeHtml(preview)}</div>
-        </div>
-      `;
-    }).join("") : '<div class="chat-empty">No conversations yet.</div>';
-
-    list.querySelectorAll("[data-open-message]").forEach(btn => {
-      btn.onclick = () => {
-        window.__adminSelectedMessageId = btn.dataset.openMessage;
-        renderMessages(messages);
-      };
-    });
-
-    if(!current){
-      header.textContent = "Select a conversation";
-      chat.innerHTML = '<div class="chat-empty">No conversation selected.</div>';
-      replyText.value = "";
-      return;
-    }
-
-    header.textContent = `${current.name || "-"} • ${current.phone || "-"}`;
-    statusSel.value = current.status || "New";
-    const thread = Array.isArray(current.thread) ? current.thread : [];
-    chat.innerHTML = thread.length ? thread.map(item => `
-      <div class="chat-bubble ${item.sender === "admin" ? "admin" : "customer"}">
-        ${renderChatMessageBody(item)}
-        <span class="chat-meta">${item.sender === "admin" ? "Admin" : current.name || "Customer"} • ${formatChatTime(item.at)}</span>
-      </div>
-    `).join("") : '<div class="chat-empty">No messages yet.</div>';
-    chat.scrollTop = chat.scrollHeight;
-
-    sendBtn.onclick = async () => {
-      const text = (replyText.value || "").trim();
-      const imageFile = $("adminReplyImage")?.files?.[0] || null;
-      const newStatus = statusSel.value || "Replied";
-      if(!text && !imageFile){
-        showNotice("Type a reply or add an image");
-        return;
-      }
-      try{
-        const now = new Date().toISOString();
-        const image = imageFile ? await compressImageFile(imageFile) : "";
-        const newThread = thread.concat([{ sender:"admin", text, image, at: now }]);
-        await updateMessage(current.id, {
-          thread: newThread,
-          reply: text || (image ? "Image attachment" : ""),
-          latestMessage: text || (image ? "Image attachment" : "New reply"),
-          status: newStatus === "New" ? "Replied" : newStatus,
-          updatedAt: now
-        });
-        replyText.value = "";
-        clearFileInput("adminReplyImage", "adminReplyImagePreviewWrap", "adminReplyImagePreview", "adminReplyImageName");
-        showNotice("Reply sent");
-      }catch(error){
-        console.error(error);
-        showNotice("Reply failed");
-      }
-    };
-
-    statusSel.onchange = async () => {
-      try{
-        await updateMessage(current.id, { status: statusSel.value });
-        showNotice("Status updated");
-      }catch{
-        showNotice("Status update failed");
-      }
-    };
+  function printReceipt(order){
+    if(!order){ showNotice("Order not found"); return; }
+    const items = Array.isArray(order.items) ? order.items : [];
+    const subtotal = items.reduce((sum, item) => sum + Number(item.price || 0) * Number(item.qty || 0), 0);
+    const shipping = Math.max(0, Number(order.total || 0) - subtotal);
+    const dateText = new Date().toLocaleString();
+    const rowsHtml = items.map(item => `
+      <tr>
+        <td>${escapeHtml(item.name || "Item")}<br><small>${escapeHtml(item.size || item.variant || "")}</small></td>
+        <td style="text-align:center">${Number(item.qty || 0)}</td>
+        <td style="text-align:right">${money(item.price || 0)}</td>
+        <td style="text-align:right">${money(Number(item.price || 0) * Number(item.qty || 0))}</td>
+      </tr>
+    `).join("");
+    const html = `<!doctype html><html><head><title>Receipt ${escapeHtml(order.id || "")}</title><style>
+      body{font-family:Arial,sans-serif;margin:0;padding:18px;color:#111;background:#fff}.receipt{max-width:320px;margin:auto}.center{text-align:center}.shop{font-size:18px;font-weight:900}.muted{font-size:12px;color:#555}hr{border:0;border-top:1px dashed #999;margin:12px 0}table{width:100%;border-collapse:collapse;font-size:12px}td,th{padding:6px 0;border-bottom:1px solid #eee;vertical-align:top}.total{font-size:18px;font-weight:900}.paid{font-size:14px;font-weight:900;border:2px solid #111;display:inline-block;padding:5px 12px;margin-top:8px}@media print{body{padding:0}.no-print{display:none}}
+    </style></head><body><div class="receipt">
+      <div class="center"><div class="shop">MR VAPE SHOP</div><div class="muted">Official POS Receipt</div><div class="paid">PAID</div></div><hr>
+      <div class="muted">Receipt: ${escapeHtml(order.id || "-")}<br>Date: ${escapeHtml(dateText)}<br>Customer: ${escapeHtml(order.customer?.name || "Walk-in Customer")}<br>Phone: ${escapeHtml(order.customer?.phone || "-")}</div><hr>
+      <table><thead><tr><th align="left">Item</th><th>Qty</th><th align="right">Price</th><th align="right">Total</th></tr></thead><tbody>${rowsHtml}</tbody></table><hr>
+      <table><tr><td>Subtotal</td><td style="text-align:right">${money(subtotal)}</td></tr><tr><td>Shipping/Fee</td><td style="text-align:right">${money(shipping)}</td></tr><tr><td class="total">TOTAL</td><td class="total" style="text-align:right">${money(order.total || 0)}</td></tr></table>
+      <hr><div class="center muted">Thank you for shopping with us!</div><br><button class="no-print" onclick="window.print()">Print Receipt</button>
+    </div><script>window.onload=function(){setTimeout(function(){window.print()},300)}<\/script></body></html>`;
+    const win = window.open("", "_blank", "width=420,height=700");
+    if(!win){ showNotice("Popup blocked. Allow popups to print receipt."); return; }
+    win.document.open(); win.document.write(html); win.document.close();
   }
 
+  async function payAndPrintOrder(orderId){
+    const order = activeOrdersCache.find(x => x.id === orderId);
+    if(!order){ showNotice("Order not found"); return; }
+    try{
+      if(getMode()==="firebase" && firebaseReady) await updateDoc(doc(db, "orders", orderId), { status:"Paid", paidAt:serverTimestamp() });
+      else { const orders = getLocalOrders(); const idx = orders.findIndex(o => o.id === orderId); if(idx >= 0){ orders[idx].status = "Paid"; orders[idx].paidAt = new Date().toISOString(); setLocalOrders(orders); } }
+      printReceipt({ ...order, status:"Paid" });
+      showNotice("Paid. Receipt ready to print");
+    }catch(error){ showNotice("Payment update failed"); }
+  }
+
+  function renderOrders(activeOrders, historyOrders){
+    activeOrdersCache = activeOrders.slice();
+    const tbody = $("ordersTable"), historyBody = $("historyTable");
+    if(!tbody || !historyBody) return;
+    if(!activeOrders.length) tbody.innerHTML = '<tr><td colspan="6" class="empty">No active orders yet.</td></tr>';
+    else {
+      tbody.innerHTML = activeOrders.map(order => `<tr><td>${escapeHtml(order.id||"-")}</td><td><div style="font-weight:800">${escapeHtml(order.customer?.name||"-")}</div><div class="small">${escapeHtml(order.customer?.phone||"")}</div></td><td>${money(order.total||0)}</td><td><select class="order-status-select" data-order-status="${escapeHtml(order.id||"")}"><option value="Pending" ${order.status==="Pending"?"selected":""}>Pending</option><option value="Preparing" ${order.status==="Preparing"?"selected":""}>Preparing</option><option value="Ready" ${order.status==="Ready"?"selected":""}>Ready</option><option value="Paid" ${order.status==="Paid"?"selected":""}>Paid</option><option value="Completed" ${order.status==="Completed"?"selected":""}>Completed</option></select></td><td>${(order.items||[]).map(i => `${escapeHtml(i.name)} x${Number(i.qty)}<br><span class="small">${escapeHtml(i.size || "")}</span>`).join("<br>")}</td><td><div class="row-actions"><button class="btn dark" data-pay-print="${escapeHtml(order.id||"")}">Paid + Print</button><button class="btn ghost" data-print-order="${escapeHtml(order.id||"")}">Print</button><button class="btn ghost" data-archive-order="${escapeHtml(order.id||"")}">Move to History</button></div></td></tr>`).join("");
+      tbody.querySelectorAll("[data-order-status]").forEach(select => select.onchange = async function(){ try { await updateOrderStatus(this.dataset.orderStatus, this.value, activeOrdersCache); showNotice(this.value==="Completed" ? "Order moved to history" : "Order status updated"); } catch { showNotice("Status update failed"); } });
+      tbody.querySelectorAll("[data-pay-print]").forEach(btn => btn.onclick = async () => payAndPrintOrder(btn.dataset.payPrint));
+      tbody.querySelectorAll("[data-print-order]").forEach(btn => btn.onclick = () => printReceipt(activeOrdersCache.find(x => x.id === btn.dataset.printOrder)));
+      tbody.querySelectorAll("[data-archive-order]").forEach(btn => btn.onclick = async () => { try { await moveOrderToHistory(btn.dataset.archiveOrder, activeOrdersCache); showNotice("Order moved to history"); } catch { showNotice("Move failed"); } });
+    }
+    if(!historyOrders.length) historyBody.innerHTML = '<tr><td colspan="5" class="empty">No order history yet.</td></tr>';
+    else historyBody.innerHTML = historyOrders.map(order => `<tr><td>${escapeHtml(order.id||"-")}</td><td><div style="font-weight:800">${escapeHtml(order.customer?.name||"-")}</div><div class="small">${escapeHtml(order.customer?.phone||"")}</div></td><td>${money(order.total||0)}</td><td>${escapeHtml(order.status||"Completed")}</td><td>${(order.items||[]).map(i => `${escapeHtml(i.name)} x${Number(i.qty)}<br><span class="small">${escapeHtml(i.size || "")}</span>`).join("<br>")}</td></tr>`).join("");
+  }
 
   function renderCustomers(customers){ const tbody = $("customersTable"); if(!tbody) return; if(!customers.length){ tbody.innerHTML = '<tr><td colspan="4" class="empty">No customers yet.</td></tr>'; return; } tbody.innerHTML = customers.map(customer => `<tr><td>${escapeHtml(customer.name||"-")}</td><td>${escapeHtml(customer.phone||"-")}</td><td>${escapeHtml(customer.email||"-")}</td><td>${escapeHtml(customer.address||"-")}</td></tr>`).join(""); }
   function switchTab(tabName){ document.querySelectorAll(".admin-tab-panel").forEach(panel => panel.classList.add("hidden")); const target = $("tab-"+tabName); if(target) target.classList.remove("hidden"); document.querySelectorAll(".admin-tab-btn").forEach(btn => btn.classList.toggle("active", btn.dataset.tab===tabName)); }
@@ -1119,11 +1124,12 @@ function initAdmin(){
       category:$("category").value,
       price:Number($("price").value),
       oldPrice:Number($("oldPrice").value),
-      stock:Number($("stock").value),
+      stock:(function(){ const vd = window.getVariantData ? window.getVariantData() : {variantStocks:{}}; const total = sumVariantStocks(vd.variantStocks); return total > 0 ? total : Number($("stock").value); })(),
       sold:$("sold").value.trim() || "0 sold",
       badge:$("badge").value.trim() || "New",
       variants:(window.getVariantData ? window.getVariantData().variants : ($("variants") ? $("variants").value.split(/\n|,/) : []).map(v => v.trim()).filter(Boolean)),
       variantImages:(window.getVariantData ? window.getVariantData().variantImages : {}),
+      variantStocks:(window.getVariantData ? window.getVariantData().variantStocks : {}),
       variantPhotoList:(window.getVariantData ? window.getVariantData().variantPhotoList : []),
       image:(function(){ const vd = window.getVariantData ? window.getVariantData() : {variantPhotoList:[]}; const extra = window.getProductImageUrls ? window.getProductImageUrls() : [$("image").value.trim()]; return (vd.variantPhotoList[0]?.image || extra[0] || ""); })(),
       images:(function(){ const vd = window.getVariantData ? window.getVariantData() : {variantPhotoList:[]}; const variantImgs = (vd.variantPhotoList || []).map(v => v.image).filter(Boolean); const extra = (window.getProductImageUrls ? window.getProductImageUrls() : [$("image").value.trim()]).filter(Boolean); return Array.from(new Set(variantImgs.concat(extra))); })()
@@ -1182,29 +1188,36 @@ document.addEventListener("keydown", (event) => {
     const data = rows().map(row => {
       const name = (row.querySelector('.variant-name')?.value || '').trim();
       const image = (row.querySelector('.variant-image')?.value || '').trim();
-      return { name, image };
+      const stock = Number(row.querySelector('.variant-stock')?.value || 0);
+      return { name, image, stock };
     }).filter(v => v.name || v.image);
     const names = data.map(v => v.name).filter(Boolean);
     const imageMap = {};
-    data.forEach(v => { if(v.name && v.image) imageMap[v.name] = v.image; });
+    const stockMap = {};
+    data.forEach(v => { if(v.name && v.image) imageMap[v.name] = v.image; if(v.name) stockMap[v.name] = Number(v.stock || 0); });
     if($('variants')) $('variants').value = names.join('\n');
     if($('variantImages')) $('variantImages').value = JSON.stringify(imageMap);
-    return { variants:names, variantImages:imageMap, variantPhotoList:data.filter(v => v.image) };
+    const totalStock = sumVariantStocks(stockMap);
+    if($('stock') && names.length) $('stock').value = totalStock;
+    return { variants:names, variantImages:imageMap, variantStocks:stockMap, variantPhotoList:data.filter(v => v.image || v.stock) };
   }
   window.getVariantData = syncVariantData;
 
-  function addVariantRow(name, image){
+  function addVariantRow(name, image, stock){
     const wrap = $('variantRows');
     if(!wrap) return;
     const row = document.createElement('div');
     row.className = 'variant-row variant-photo-row';
-    row.innerHTML = '<input class="variant-name" type="text" placeholder="Flavor / color name e.g. Black Wave" value=""><input class="variant-image" type="text" placeholder="Image URL for this flavor/color"><label class="image-upload-btn">Upload<input class="variant-file" type="file" accept="image/*" hidden></label><button type="button" aria-label="Remove variant">Remove</button>';
+    row.innerHTML = '<input class="variant-name" type="text" placeholder="Flavor / color name e.g. Black Wave" value=""><input class="variant-stock" type="number" min="0" placeholder="Stock"><input class="variant-image" type="text" placeholder="Image URL for this flavor/color"><label class="image-upload-btn">Upload<input class="variant-file" type="file" accept="image/*" hidden></label><button type="button" aria-label="Remove variant">Remove</button>';
     const nameInput = row.querySelector('.variant-name');
+    const stockInput = row.querySelector('.variant-stock');
     const imageInput = row.querySelector('.variant-image');
     const fileInput = row.querySelector('.variant-file');
     nameInput.value = name || '';
+    stockInput.value = Number(stock || 0);
     imageInput.value = image || '';
     nameInput.addEventListener('input', syncVariantData);
+    stockInput.addEventListener('input', syncVariantData);
     imageInput.addEventListener('input', syncVariantData);
     fileInput.addEventListener('change', async function(){
       const picked = fileInput.files && fileInput.files[0];
@@ -1236,12 +1249,13 @@ document.addEventListener("keydown", (event) => {
     if(Array.isArray(item?.variants)) names = item.variants;
     else if(hidden && hidden.value) names = hidden.value.split(/\n|,/).map(v => v.trim()).filter(Boolean);
     const map = item?.variantImages && typeof item.variantImages === 'object' ? item.variantImages : {};
+    const stockMap = item?.variantStocks && typeof item.variantStocks === 'object' ? item.variantStocks : {};
     if(!names.length && Array.isArray(item?.variantPhotoList)) names = item.variantPhotoList.map(v => v.name).filter(Boolean);
     wrap.innerHTML = '';
-    (names.length ? names : ['']).forEach(name => addVariantRow(name, map[name] || ''));
+    (names.length ? names : ['']).forEach(name => addVariantRow(name, map[name] || '', stockMap[name] || 0));
     if(Array.isArray(item?.variantPhotoList)){
       item.variantPhotoList.forEach(v => {
-        if(v && v.image && !rows().some(row => (row.querySelector('.variant-image')?.value || '') === v.image)) addVariantRow(v.name || '', v.image || '');
+        if(v && (v.image || v.stock) && !rows().some(row => (row.querySelector('.variant-image')?.value || '') === v.image && (row.querySelector('.variant-name')?.value || '') === v.name)) addVariantRow(v.name || '', v.image || '', v.stock || stockMap[v.name] || 0);
       });
     }
     syncVariantData();
