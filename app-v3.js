@@ -538,12 +538,13 @@ function initShop(){
     selectedSize = null;
     detailQty = 1;
 
-    const galleryImages = Array.isArray(p.images) && p.images.length ? p.images : [p.image, p.image, p.image];
+    const galleryImages = (Array.isArray(p.images) && p.images.length ? p.images : [p.image]).filter(Boolean);
     $("productPageMainImage").src = galleryImages[0] || p.image;
     $("productPageBadge").textContent = p.badge || "New";
-    $("thumbImg1").src = galleryImages[0] || p.image;
-    $("thumbImg2").src = galleryImages[1] || galleryImages[0] || p.image;
-    $("thumbImg3").src = galleryImages[2] || galleryImages[0] || p.image;
+    const productThumbs = $("productThumbs");
+    if(productThumbs){
+      productThumbs.innerHTML = galleryImages.map((img, i) => '<button class="product-thumb ' + (i === 0 ? 'active' : '') + '" type="button" data-gallery-index="' + i + '"><img src="' + escapeHtml(img) + '" alt="Product photo ' + (i+1) + '"></button>').join("");
+    }
     $("productPageBrand").textContent = p.brand || "MR VAPE SHOP";
     $("productPageName").textContent = p.name || "";
     $("productPagePrice").textContent = money(p.price);
@@ -554,18 +555,21 @@ function initShop(){
     $("productPageDescription").textContent =
       `${p.name} is available in our vape catalog. Check the price, stock, available flavor or device color, then add to cart for checkout or shop inquiry.`;
 
-    [$("thumbBtn1"), $("thumbBtn2"), $("thumbBtn3")].forEach((thumb, i) => {
-      if(!thumb) return;
-      thumb.classList.toggle("active", i === 0);
-      thumb.onclick = () => {
-        [$("thumbBtn1"), $("thumbBtn2"), $("thumbBtn3")].forEach(t => t && t.classList.remove("active"));
-        thumb.classList.add("active");
-        $("productPageMainImage").src = galleryImages[i] || galleryImages[0] || p.image;
-      };
-    });
+    if(productThumbs){
+      productThumbs.querySelectorAll("[data-gallery-index]").forEach(thumb => {
+        thumb.onclick = () => {
+          productThumbs.querySelectorAll(".product-thumb").forEach(t => t.classList.remove("active"));
+          thumb.classList.add("active");
+          const i = Number(thumb.dataset.galleryIndex || 0);
+          $("productPageMainImage").src = galleryImages[i] || galleryImages[0] || p.image;
+        };
+      });
+    }
 
     const defaultVariants = p.category === "Devices" || p.category === "Battery" ? ["Black","Gold","Purple","Blue"] : ["Classic","Mint","Fruit","Ice"];
     const variants = Array.isArray(p.variants) && p.variants.length ? p.variants : defaultVariants;
+    const variantDetail = document.getElementById("productDetailVariants");
+    if(variantDetail) variantDetail.textContent = variants.join(", ");
     const sizeGrid = $("sizeGrid");
     if(sizeGrid){
       sizeGrid.innerHTML = variants.map(v => `<button class="size-option" type="button" data-size="${escapeHtml(v)}">${escapeHtml(v)}</button>`).join("");
@@ -976,8 +980,8 @@ function initAdmin(){
     topActions.appendChild(logoutBtn);
   }
   function updateStats(items){ $("statProducts").textContent = items.length; $("statStock").textContent = items.reduce((a,b)=>a+Number(b.stock||0),0); $("statLow").textContent = items.filter(x=>Number(x.stock||0)<=10).length; $("statCategories").textContent = new Set(items.map(x=>x.category)).size; }
-  function clearForm(){ form.reset(); $("docId").value = ""; if($("image2")) $("image2").value=""; if($("image3")) $("image3").value=""; if($("image4")) $("image4").value=""; }
-  function fillForm(item){ $("docId").value=item.id; $("name").value=item.name||""; $("brand").value=item.brand||""; $("category").value=item.category||"Pods"; $("price").value=item.price||0; $("oldPrice").value=item.oldPrice||0; $("stock").value=item.stock||0; $("sold").value=item.sold||""; $("badge").value=item.badge||""; if($("variants")) $("variants").value = Array.isArray(item.variants) ? item.variants.join("\n") : ""; $("image").value=item.image||""; $("image2").value=(item.images&&item.images[1])||""; $("image3").value=(item.images&&item.images[2])||""; $("image4").value=(item.images&&item.images[3])||""; window.scrollTo({top:0, behavior:"smooth"}); }
+  function clearForm(){ form.reset(); $("docId").value = ""; if($("variants")) $("variants").value = ""; if($("image")) $("image").value = ""; window.__pendingProductImages = [""]; setTimeout(() => window.hydrateProductImageRows && window.hydrateProductImageRows([""]), 0); }
+  function fillForm(item){ $("docId").value=item.id; $("name").value=item.name||""; $("brand").value=item.brand||""; $("category").value=item.category||"Pods"; $("price").value=item.price||0; $("oldPrice").value=item.oldPrice||0; $("stock").value=item.stock||0; $("sold").value=item.sold||""; $("badge").value=item.badge||""; if($("variants")) $("variants").value = Array.isArray(item.variants) ? item.variants.join("\n") : ""; const imgs = (Array.isArray(item.images) && item.images.length ? item.images : [item.image]).filter(Boolean); if($("image")) $("image").value = imgs[0] || ""; window.__pendingProductImages = imgs.length ? imgs : [""]; setTimeout(() => window.hydrateProductImageRows && window.hydrateProductImageRows(window.__pendingProductImages), 0); window.scrollTo({top:0, behavior:"smooth"}); }
   function renderProductsAdmin(items, source){ $("adminSourceLabel").textContent = source==="firebase" ? "Live from Firebase" : "Using local fallback"; updateStats(items); if(!items.length){ table.innerHTML = '<tr><td colspan="5" class="empty">No products found.</td></tr>'; return; } table.innerHTML = items.map(item => `<tr><td><div style="font-weight:800">${escapeHtml(item.name)}</div><div class="small">${escapeHtml(item.brand)}</div></td><td>${escapeHtml(item.category)}</td><td>${money(item.price)}</td><td>${Number(item.stock||0)}</td><td><div class="row-actions"><button class="btn ghost" data-edit="${item.id}">Edit</button><button class="btn dark" data-delete="${item.id}">Delete</button></div></td></tr>`).join(""); table.querySelectorAll("[data-edit]").forEach(btn => btn.onclick = () => { const item = items.find(x => x.id===btn.dataset.edit); if(item) fillForm(item); }); table.querySelectorAll("[data-delete]").forEach(btn => btn.onclick = async () => { try { await deleteProductItem(btn.dataset.delete); showNotice("Product deleted"); } catch { showNotice("Delete failed"); } }); }
   function renderOrders(activeOrders, historyOrders){ activeOrdersCache = activeOrders.slice(); const tbody = $("ordersTable"), historyBody = $("historyTable"); if(!tbody || !historyBody) return; if(!activeOrders.length) tbody.innerHTML = '<tr><td colspan="6" class="empty">No active orders yet.</td></tr>'; else { tbody.innerHTML = activeOrders.map(order => `<tr><td>${escapeHtml(order.id||"-")}</td><td><div style="font-weight:800">${escapeHtml(order.customer?.name||"-")}</div><div class="small">${escapeHtml(order.customer?.phone||"")}</div></td><td>${money(order.total||0)}</td><td><select class="order-status-select" data-order-status="${escapeHtml(order.id||"")}"><option value="Pending" ${order.status==="Pending"?"selected":""}>Pending</option><option value="Preparing" ${order.status==="Preparing"?"selected":""}>Preparing</option><option value="Ready" ${order.status==="Ready"?"selected":""}>Ready</option><option value="Completed" ${order.status==="Completed"?"selected":""}>Completed</option></select></td><td>${(order.items||[]).map(i => `${escapeHtml(i.name)} x${Number(i.qty)}`).join("<br>")}</td><td><button class="btn ghost" data-archive-order="${escapeHtml(order.id||"")}">Move to History</button></td></tr>`).join(""); tbody.querySelectorAll("[data-order-status]").forEach(select => select.onchange = async function(){ try { await updateOrderStatus(this.dataset.orderStatus, this.value, activeOrdersCache); showNotice(this.value==="Completed" ? "Order moved to history" : "Order status updated"); } catch { showNotice("Status update failed"); } }); tbody.querySelectorAll("[data-archive-order]").forEach(btn => btn.onclick = async () => { try { await moveOrderToHistory(btn.dataset.archiveOrder, activeOrdersCache); showNotice("Order moved to history"); } catch { showNotice("Move failed"); } }); } if(!historyOrders.length) historyBody.innerHTML = '<tr><td colspan="5" class="empty">No order history yet.</td></tr>'; else historyBody.innerHTML = historyOrders.map(order => `<tr><td>${escapeHtml(order.id||"-")}</td><td><div style="font-weight:800">${escapeHtml(order.customer?.name||"-")}</div><div class="small">${escapeHtml(order.customer?.phone||"")}</div></td><td>${money(order.total||0)}</td><td>${escapeHtml(order.status||"Completed")}</td><td>${(order.items||[]).map(i => `${escapeHtml(i.name)} x${Number(i.qty)}`).join("<br>")}</td></tr>`).join(""); }
 
@@ -1098,13 +1102,8 @@ function initAdmin(){
       sold:$("sold").value.trim() || "0 sold",
       badge:$("badge").value.trim() || "New",
       variants:($("variants") ? $("variants").value.split(/\n|,/) : []).map(v => v.trim()).filter(Boolean),
-      image:$("image").value.trim(),
-      images:[
-        $("image").value.trim(),
-        $("image2") ? $("image2").value.trim() : "",
-        $("image3") ? $("image3").value.trim() : "",
-        $("image4") ? $("image4").value.trim() : ""
-      ].filter(Boolean)
+      image:(window.getProductImageUrls ? window.getProductImageUrls()[0] : $("image").value.trim()) || "",
+      images:(window.getProductImageUrls ? window.getProductImageUrls() : [$("image").value.trim()]).filter(Boolean)
     }; try { await saveProduct(payload, docId || null); clearForm(); showNotice("Product saved"); } catch { showNotice("Save failed"); } };
   $("clearFormBtn").onclick = clearForm;
   $("seedBtn").onclick = async () => { try { await seedProducts(); showNotice("Demo products added"); } catch (error) { showNotice(error.message || "Seed failed"); } };
@@ -1151,3 +1150,96 @@ document.addEventListener("keydown", (event) => {
     document.getElementById("sendAdminReplyBtn")?.click();
   }
 });
+
+/* === Custom Variant Builder Upgrade === */
+(function(){
+  function $(id){ return document.getElementById(id); }
+  function getRows(){ return Array.from(document.querySelectorAll('#variantRows .variant-row input')); }
+  function syncHiddenVariants(){
+    const hidden = $('variants');
+    if(!hidden) return [];
+    const values = getRows().map(i => (i.value || '').trim()).filter(Boolean);
+    hidden.value = values.join('\n');
+    return values;
+  }
+  function addVariantRow(value){
+    const wrap = $('variantRows');
+    if(!wrap) return;
+    const row = document.createElement('div');
+    row.className = 'variant-row';
+    row.innerHTML = '<input type="text" placeholder="Example: Black Wave / Gold / Blue Freeze" value=""><button type="button" aria-label="Remove variant">Remove</button>';
+    const input = row.querySelector('input');
+    input.value = value || '';
+    input.addEventListener('input', syncHiddenVariants);
+    row.querySelector('button').addEventListener('click', function(){ row.remove(); syncHiddenVariants(); });
+    wrap.appendChild(row);
+    syncHiddenVariants();
+  }
+  function hydrateVariantRows(){
+    const wrap = $('variantRows');
+    const hidden = $('variants');
+    if(!wrap || !hidden) return;
+    const values = (hidden.value || '').split(/\n|,/).map(v => v.trim()).filter(Boolean);
+    wrap.innerHTML = '';
+    (values.length ? values : ['']).forEach(addVariantRow);
+    syncHiddenVariants();
+  }
+  window.addEventListener('DOMContentLoaded', function(){
+    if(!$('variantRows')) return;
+    hydrateVariantRows();
+    const addBtn = $('addVariantRowBtn');
+    if(addBtn) addBtn.addEventListener('click', function(){ addVariantRow(''); const inputs=getRows(); inputs[inputs.length-1]?.focus(); });
+    const form = $('productForm');
+    if(form) form.addEventListener('submit', syncHiddenVariants, true);
+    const clearBtn = $('clearFormBtn');
+    if(clearBtn) clearBtn.addEventListener('click', function(){ setTimeout(hydrateVariantRows, 0); });
+    document.addEventListener('click', function(e){
+      if(e.target && e.target.closest('[data-edit]')) setTimeout(hydrateVariantRows, 0);
+    }, true);
+  });
+})();
+
+/* === Unlimited Product Image Builder Upgrade === */
+(function(){
+  function $(id){ return document.getElementById(id); }
+  function getImageInputs(){ return Array.from(document.querySelectorAll('#imageRows .image-row input')); }
+  function syncProductImages(){
+    const urls = getImageInputs().map(input => (input.value || '').trim()).filter(Boolean);
+    const main = $('image');
+    if(main) main.value = urls[0] || '';
+    return urls;
+  }
+  window.getProductImageUrls = syncProductImages;
+  function addImageRow(value){
+    const wrap = $('imageRows');
+    if(!wrap) return;
+    const row = document.createElement('div');
+    row.className = 'image-row';
+    row.innerHTML = '<input type="url" placeholder="Paste image URL for product/flavor photo" value=""><button type="button" aria-label="Remove image">Remove</button>';
+    const input = row.querySelector('input');
+    input.value = value || '';
+    input.addEventListener('input', syncProductImages);
+    row.querySelector('button').addEventListener('click', function(){ row.remove(); if(!getImageInputs().length) addImageRow(''); syncProductImages(); });
+    wrap.appendChild(row);
+    syncProductImages();
+  }
+  function hydrateProductImageRows(values){
+    const wrap = $('imageRows');
+    if(!wrap) return;
+    const list = Array.isArray(values) && values.length ? values : (window.__pendingProductImages || ['']);
+    wrap.innerHTML = '';
+    list.forEach(addImageRow);
+    syncProductImages();
+  }
+  window.hydrateProductImageRows = hydrateProductImageRows;
+  window.addEventListener('DOMContentLoaded', function(){
+    if(!$('imageRows')) return;
+    hydrateProductImageRows(window.__pendingProductImages || ['']);
+    const addBtn = $('addImageRowBtn');
+    if(addBtn) addBtn.addEventListener('click', function(){ addImageRow(''); const inputs=getImageInputs(); inputs[inputs.length-1]?.focus(); });
+    const form = $('productForm');
+    if(form) form.addEventListener('submit', syncProductImages, true);
+    const clearBtn = $('clearFormBtn');
+    if(clearBtn) clearBtn.addEventListener('click', function(){ setTimeout(() => hydrateProductImageRows(['']), 0); });
+  });
+})();

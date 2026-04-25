@@ -80,19 +80,29 @@
                 <label>Badge<input id="badge" placeholder="8 Flavors" /></label>
               </div>
 
-              <label>Variants / Flavors / Colors
-                <textarea id="variants" rows="5" placeholder="Add unlimited variants, one per line. Example:
-Black Wave
-Beer Sparkle
-Gold
-Purple"></textarea>
-              </label>
-              <p class="form-hint">Tip: Add as many variants as you want. One variant per line.</p>
+              <div class="variant-builder">
+                <div class="variant-builder-head">
+                  <div>
+                    <strong>Variants / Flavors / Colors</strong>
+                    <p class="form-hint">Add unlimited custom variants. These exact names will show in customer Product Details.</p>
+                  </div>
+                  <button class="btn ghost" type="button" id="addVariantRowBtn">+ Add Variant</button>
+                </div>
+                <div id="variantRows" class="variant-rows"></div>
+                <textarea id="variants" class="hidden" rows="5"></textarea>
+              </div>
 
-              <label>Main Image URL<input id="image" required placeholder="https://..." /></label>
-              <label>Gallery Image 2<input id="image2" placeholder="https://..." /></label>
-              <label>Gallery Image 3<input id="image3" placeholder="https://..." /></label>
-              <label>Gallery Image 4<input id="image4" placeholder="https://..." /></label>
+              <div class="gallery-builder">
+                <div class="variant-builder-head">
+                  <div>
+                    <strong>Product Images / Flavor Photos</strong>
+                    <p class="form-hint">Add as many image URLs as you need. Use one photo per flavor so customers can preview each pod flavor.</p>
+                  </div>
+                  <button class="btn ghost" type="button" id="addImageRowBtn">+ Add Image</button>
+                </div>
+                <div id="imageRows" class="image-rows"></div>
+                <input id="image" class="hidden" required />
+              </div>
 
               <div class="form-actions">
                 <button type="submit" class="btn dark">Save Product</button>
