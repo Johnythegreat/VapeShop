@@ -575,10 +575,17 @@ function initShop(){
         const variantImage = btn.dataset.image || "";
         if(variantImage){
           const main = $("productPageMainImage");
-          if(main) main.src = variantImage;
+          if(main){
+            main.src = variantImage;
+            main.classList.add("variant-image-changed");
+            setTimeout(() => main.classList.remove("variant-image-changed"), 220);
+          }
           document.querySelectorAll(".product-thumb").forEach(t => t.classList.remove("active"));
           const matchingThumb = Array.from(document.querySelectorAll(".product-thumb")).find(t => t.dataset.image === variantImage);
-          if(matchingThumb) matchingThumb.classList.add("active");
+          if(matchingThumb){
+            matchingThumb.classList.add("active");
+            matchingThumb.scrollIntoView({behavior:"smooth", inline:"center", block:"nearest"});
+          }
         }
       };
     });
@@ -592,7 +599,12 @@ function initShop(){
     selectedSize = null;
     detailQty = 1;
 
-    const variantImageMap = (p.variantImages && typeof p.variantImages === "object") ? p.variantImages : {};
+    const variantImageMap = (p.variantImages && typeof p.variantImages === "object") ? { ...p.variantImages } : {};
+    if(Array.isArray(p.variantPhotoList)){
+      p.variantPhotoList.forEach(v => {
+        if(v && v.name && v.image && !variantImageMap[v.name]) variantImageMap[v.name] = v.image;
+      });
+    }
     const variantGalleryImages = Object.values(variantImageMap).map(x => String(x || "").trim()).filter(Boolean);
     const productImages = (Array.isArray(p.images) && p.images.length ? p.images : [firstProductImage(p)]).map(x => String(x || "").trim()).filter(Boolean);
     const galleryImages = Array.from(new Set(variantGalleryImages.concat(productImages))).filter(Boolean);
@@ -631,7 +643,7 @@ function initShop(){
     if(sizeGrid){
       sizeGrid.innerHTML = variants.map(v => {
         const vStock = getVariantStock(p, v);
-        return `<button class="size-option" type="button" data-size="${escapeHtml(v)}" data-image="${escapeHtml(variantImageMap[v] || "")}" ${vStock <= 0 ? "disabled" : ""}>${escapeHtml(v)}<span class="variant-stock-pill">${vStock > 0 ? vStock + " in stock" : "Out of stock"}</span>${variantImageMap[v] ? '<span class="variant-has-photo">Photo</span>' : ''}</button>`;
+        return `<button class="size-option" type="button" data-size="${escapeHtml(v)}" data-image="${escapeHtml(variantImageMap[v] || "")}" ${vStock <= 0 ? "disabled" : ""}>${escapeHtml(v)}<span class="variant-stock-pill">${vStock > 0 ? vStock + " in stock" : "Out of stock"}</span></button>`;
       }).join("");
     }
     document.querySelectorAll(".size-option").forEach(btn => btn.classList.remove("active"));

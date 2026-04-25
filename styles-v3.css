@@ -811,3 +811,19 @@ html,body{background:radial-gradient(circle at top,#182033 0,#05070c 45%,#030407
 .order-status-select{background:#050914;color:#fff;border:1px solid rgba(125,249,255,.25);border-radius:10px;padding:8px;}
 .row-actions .btn{padding:8px 10px;font-size:12px;}
 @media(max-width:720px){.variant-photo-row{grid-template-columns:1fr !important}.variant-stock{max-width:none}}
+
+/* Variant image auto-change polish */
+.product-page-main img,
+#productPageMainImage {
+  transition: opacity .18s ease, transform .18s ease;
+}
+#productPageMainImage.variant-image-changed {
+  opacity: .88;
+  transform: scale(.985);
+}
+.size-option .variant-stock-pill {
+  display:block;
+  margin-top:3px;
+  font-size:11px;
+  opacity:.9;
+}
