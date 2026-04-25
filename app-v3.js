@@ -24,6 +24,7 @@ const demoProducts = [
     stock:80,
     sold:"120+ sold",
     badge:"8 Flavors",
+    variants:["Black Wave","Beer Sparkle","Trouble Purple","Very More","Very Baguio","Red Cannon","Bacteria Monster","Blue Freeze"],
     image:"https://images.unsplash.com/photo-1628175795172-20291f2c9b67?auto=format&fit=crop&w=800&q=80",
     images:[
       "https://images.unsplash.com/photo-1628175795172-20291f2c9b67?auto=format&fit=crop&w=800&q=80",
@@ -40,6 +41,7 @@ const demoProducts = [
     stock:45,
     sold:"90+ sold",
     badge:"4 Colors",
+    variants:["Black","Gold","Purple","Blue"],
     image:"https://images.unsplash.com/photo-1610651709623-4e8e1c2107dd?auto=format&fit=crop&w=800&q=80",
     images:[
       "https://images.unsplash.com/photo-1610651709623-4e8e1c2107dd?auto=format&fit=crop&w=800&q=80",
@@ -562,6 +564,12 @@ function initShop(){
       };
     });
 
+    const defaultVariants = p.category === "Devices" || p.category === "Battery" ? ["Black","Gold","Purple","Blue"] : ["Classic","Mint","Fruit","Ice"];
+    const variants = Array.isArray(p.variants) && p.variants.length ? p.variants : defaultVariants;
+    const sizeGrid = $("sizeGrid");
+    if(sizeGrid){
+      sizeGrid.innerHTML = variants.map(v => `<button class="size-option" type="button" data-size="${escapeHtml(v)}">${escapeHtml(v)}</button>`).join("");
+    }
     document.querySelectorAll(".size-option").forEach(btn => btn.classList.remove("active"));
     $("selectedSizeLabel").textContent = "No variant selected";
     $("detailQtyValue").textContent = String(detailQty);
@@ -969,7 +977,7 @@ function initAdmin(){
   }
   function updateStats(items){ $("statProducts").textContent = items.length; $("statStock").textContent = items.reduce((a,b)=>a+Number(b.stock||0),0); $("statLow").textContent = items.filter(x=>Number(x.stock||0)<=10).length; $("statCategories").textContent = new Set(items.map(x=>x.category)).size; }
   function clearForm(){ form.reset(); $("docId").value = ""; if($("image2")) $("image2").value=""; if($("image3")) $("image3").value=""; if($("image4")) $("image4").value=""; }
-  function fillForm(item){ $("docId").value=item.id; $("name").value=item.name||""; $("brand").value=item.brand||""; $("category").value=item.category||"Pods"; $("price").value=item.price||0; $("oldPrice").value=item.oldPrice||0; $("stock").value=item.stock||0; $("sold").value=item.sold||""; $("badge").value=item.badge||""; $("image").value=item.image||""; $("image2").value=(item.images&&item.images[1])||""; $("image3").value=(item.images&&item.images[2])||""; $("image4").value=(item.images&&item.images[3])||""; window.scrollTo({top:0, behavior:"smooth"}); }
+  function fillForm(item){ $("docId").value=item.id; $("name").value=item.name||""; $("brand").value=item.brand||""; $("category").value=item.category||"Pods"; $("price").value=item.price||0; $("oldPrice").value=item.oldPrice||0; $("stock").value=item.stock||0; $("sold").value=item.sold||""; $("badge").value=item.badge||""; if($("variants")) $("variants").value = Array.isArray(item.variants) ? item.variants.join("\n") : ""; $("image").value=item.image||""; $("image2").value=(item.images&&item.images[1])||""; $("image3").value=(item.images&&item.images[2])||""; $("image4").value=(item.images&&item.images[3])||""; window.scrollTo({top:0, behavior:"smooth"}); }
   function renderProductsAdmin(items, source){ $("adminSourceLabel").textContent = source==="firebase" ? "Live from Firebase" : "Using local fallback"; updateStats(items); if(!items.length){ table.innerHTML = '<tr><td colspan="5" class="empty">No products found.</td></tr>'; return; } table.innerHTML = items.map(item => `<tr><td><div style="font-weight:800">${escapeHtml(item.name)}</div><div class="small">${escapeHtml(item.brand)}</div></td><td>${escapeHtml(item.category)}</td><td>${money(item.price)}</td><td>${Number(item.stock||0)}</td><td><div class="row-actions"><button class="btn ghost" data-edit="${item.id}">Edit</button><button class="btn dark" data-delete="${item.id}">Delete</button></div></td></tr>`).join(""); table.querySelectorAll("[data-edit]").forEach(btn => btn.onclick = () => { const item = items.find(x => x.id===btn.dataset.edit); if(item) fillForm(item); }); table.querySelectorAll("[data-delete]").forEach(btn => btn.onclick = async () => { try { await deleteProductItem(btn.dataset.delete); showNotice("Product deleted"); } catch { showNotice("Delete failed"); } }); }
   function renderOrders(activeOrders, historyOrders){ activeOrdersCache = activeOrders.slice(); const tbody = $("ordersTable"), historyBody = $("historyTable"); if(!tbody || !historyBody) return; if(!activeOrders.length) tbody.innerHTML = '<tr><td colspan="6" class="empty">No active orders yet.</td></tr>'; else { tbody.innerHTML = activeOrders.map(order => `<tr><td>${escapeHtml(order.id||"-")}</td><td><div style="font-weight:800">${escapeHtml(order.customer?.name||"-")}</div><div class="small">${escapeHtml(order.customer?.phone||"")}</div></td><td>${money(order.total||0)}</td><td><select class="order-status-select" data-order-status="${escapeHtml(order.id||"")}"><option value="Pending" ${order.status==="Pending"?"selected":""}>Pending</option><option value="Preparing" ${order.status==="Preparing"?"selected":""}>Preparing</option><option value="Ready" ${order.status==="Ready"?"selected":""}>Ready</option><option value="Completed" ${order.status==="Completed"?"selected":""}>Completed</option></select></td><td>${(order.items||[]).map(i => `${escapeHtml(i.name)} x${Number(i.qty)}`).join("<br>")}</td><td><button class="btn ghost" data-archive-order="${escapeHtml(order.id||"")}">Move to History</button></td></tr>`).join(""); tbody.querySelectorAll("[data-order-status]").forEach(select => select.onchange = async function(){ try { await updateOrderStatus(this.dataset.orderStatus, this.value, activeOrdersCache); showNotice(this.value==="Completed" ? "Order moved to history" : "Order status updated"); } catch { showNotice("Status update failed"); } }); tbody.querySelectorAll("[data-archive-order]").forEach(btn => btn.onclick = async () => { try { await moveOrderToHistory(btn.dataset.archiveOrder, activeOrdersCache); showNotice("Order moved to history"); } catch { showNotice("Move failed"); } }); } if(!historyOrders.length) historyBody.innerHTML = '<tr><td colspan="5" class="empty">No order history yet.</td></tr>'; else historyBody.innerHTML = historyOrders.map(order => `<tr><td>${escapeHtml(order.id||"-")}</td><td><div style="font-weight:800">${escapeHtml(order.customer?.name||"-")}</div><div class="small">${escapeHtml(order.customer?.phone||"")}</div></td><td>${money(order.total||0)}</td><td>${escapeHtml(order.status||"Completed")}</td><td>${(order.items||[]).map(i => `${escapeHtml(i.name)} x${Number(i.qty)}`).join("<br>")}</td></tr>`).join(""); }
 
@@ -1089,6 +1097,7 @@ function initAdmin(){
       stock:Number($("stock").value),
       sold:$("sold").value.trim() || "0 sold",
       badge:$("badge").value.trim() || "New",
+      variants:($("variants") ? $("variants").value.split(/\n|,/) : []).map(v => v.trim()).filter(Boolean),
       image:$("image").value.trim(),
       images:[
         $("image").value.trim(),

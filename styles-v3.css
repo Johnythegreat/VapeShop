@@ -624,3 +624,63 @@ html,body{background:radial-gradient(circle at top,#182033 0,#05070c 45%,#030407
   .inquiry-card{width:100% !important;max-height:92vh !important;border-radius:24px 24px 0 0 !important}
   .admin-compose-actions{flex-direction:column}
 }
+
+
+/* === VAPE PRODUCT PAGE FULL DARK FIX === */
+.product-page-modal,
+.product-page-shell,
+.product-page-header,
+.product-page-scroll,
+.product-gallery,
+.product-page-body{
+  background:#050914 !important;
+  color:#f8fbff !important;
+}
+.product-gallery{
+  border-bottom:1px solid rgba(125,249,255,.18) !important;
+}
+.product-page-header{
+  box-shadow:0 8px 24px rgba(0,0,0,.35) !important;
+}
+.size-option{
+  background:#0b1020 !important;
+  color:#f8fbff !important;
+  border:1px solid rgba(125,249,255,.22) !important;
+}
+.size-option.active,
+.size-option:hover{
+  background:linear-gradient(135deg,#00e5ff,#8b5cf6) !important;
+  color:#03101a !important;
+  border-color:transparent !important;
+}
+.qty-box-large{
+  background:#0b1020 !important;
+  border-color:rgba(125,249,255,.22) !important;
+  color:#fff !important;
+}
+.qty-box-large button{
+  background:#111827 !important;
+  color:#fff !important;
+  border:1px solid rgba(255,255,255,.12) !important;
+}
+.detail-row,
+.product-description{
+  background:#0b1020 !important;
+  color:#dbeafe !important;
+  border-color:rgba(255,255,255,.12) !important;
+}
+.thumb-row, .thumb{
+  background:#050914 !important;
+}
+.form-hint{margin:-8px 0 10px;color:#93a4bd;font-size:12px}
+.admin-form textarea{
+  width:100%;
+  border-radius:14px;
+  padding:12px 14px;
+  background:#0b1020;
+  color:#fff;
+  border:1px solid rgba(255,255,255,.16);
+  resize:vertical;
+  font:inherit;
+}
+.admin-form textarea:focus{outline:none;border-color:#7df9ff;box-shadow:0 0 0 3px rgba(125,249,255,.10)}
