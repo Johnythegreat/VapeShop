@@ -171,6 +171,11 @@
               <div class="admin-conversation-header" id="adminConversationHeader">Select a conversation</div>
               <div class="admin-chat-window" id="adminChatWindow"></div>
               <div class="admin-compose">
+                <div class="chat-quick-row" aria-label="Admin quick replies">
+                  <button class="chat-quick" type="button" data-admin-quick-reply="Hi! Yes, this is available. What flavor or color do you prefer?">Available</button>
+                  <button class="chat-quick" type="button" data-admin-quick-reply="Thank you! Please send your preferred product, flavor, quantity, and pickup/delivery details.">Ask details</button>
+                  <button class="chat-quick" type="button" data-admin-quick-reply="Your order is noted. We will update you shortly.">Order noted</button>
+                </div>
                 <textarea id="adminReplyText" placeholder="Type your reply to the customer here..."></textarea>
                 <div class="chat-upload-row">
                   <label class="upload-chip" for="adminReplyImage">📷 Add Image</label>
@@ -185,6 +190,7 @@
                   <select id="adminMessageStatus" class="order-status-select">
                     <option value="New">New</option>
                     <option value="Replied">Replied</option>
+                    <option value="Archived">Archived</option>
                   </select>
                   <button class="btn dark" id="sendAdminReplyBtn">Send Reply</button>
                 </div>

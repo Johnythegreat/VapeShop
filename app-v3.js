@@ -951,7 +951,6 @@ function initShop(){
   if($("closeInquiryBtn")) $("closeInquiryBtn").onclick = closeInquiry;
   if($("sendInquiryBtn")) {
     $("sendInquiryBtn").onclick = sendInquiry;
-    $("sendInquiryBtn").addEventListener("click", sendInquiry);
   }
   if($("inquiryModal")) $("inquiryModal").onclick = (e) => { if(e.target.id === "inquiryModal") closeInquiry(); };
 }
@@ -1104,3 +1103,42 @@ function initAdmin(){
   $("switchLocalBtn").onclick = () => { setMode("local"); showNotice("Switched to local mode"); setTimeout(() => location.reload(), 600); };
   $("switchFirebaseBtn").onclick = () => { if(!firebaseReady){ showNotice("Firebase is not available here"); return; } setMode("firebase"); showNotice("Switched to Firebase mode"); setTimeout(() => location.reload(), 600); };
 }
+
+
+/* === PRO CHAT UX HELPERS ===
+   - Quick message chips for customer and admin
+   - Enter to send, Shift+Enter for new line
+   - Keeps chat textareas focused and faster to use
+*/
+document.addEventListener("click", (event) => {
+  const customerQuick = event.target.closest("[data-quick-message]");
+  if(customerQuick){
+    const box = document.getElementById("inq_message");
+    if(box){
+      box.value = customerQuick.dataset.quickMessage || "";
+      box.focus();
+    }
+  }
+  const adminQuick = event.target.closest("[data-admin-quick-reply]");
+  if(adminQuick){
+    const box = document.getElementById("adminReplyText");
+    if(box){
+      box.value = adminQuick.dataset.adminQuickReply || "";
+      box.focus();
+    }
+  }
+});
+
+document.addEventListener("keydown", (event) => {
+  if(event.key !== "Enter" || event.shiftKey) return;
+  const target = event.target;
+  if(!target) return;
+  if(target.id === "inq_message"){
+    event.preventDefault();
+    document.getElementById("sendInquiryBtn")?.click();
+  }
+  if(target.id === "adminReplyText"){
+    event.preventDefault();
+    document.getElementById("sendAdminReplyBtn")?.click();
+  }
+});

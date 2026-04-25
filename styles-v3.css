@@ -433,3 +433,194 @@ html,body{background:radial-gradient(circle at top,#182033 0,#05070c 45%,#030407
 .notice{background:linear-gradient(135deg,#00e5ff,#8b5cf6);color:#03101a}
 .product-bottom-bar,.account-actions{background:rgba(5,7,12,.94);border-color:rgba(255,255,255,.12)}
 .summary{background:#0b1020;border-color:rgba(255,255,255,.12)}
+
+
+/* === PRO CHAT DARK MODE UPGRADE === */
+.inquiry-modal{
+  background:rgba(0,0,0,.82) !important;
+  backdrop-filter:blur(10px);
+}
+.inquiry-card,
+.inquiry-card.messenger-card{
+  background:linear-gradient(180deg,#070b12 0%,#05070c 100%) !important;
+  color:#f8fbff !important;
+  border:1px solid rgba(125,249,255,.22) !important;
+  box-shadow:0 0 0 1px rgba(255,255,255,.06),0 24px 80px rgba(0,0,0,.85),0 0 40px rgba(139,92,246,.14) !important;
+}
+.inquiry-card .drawer-head,
+.admin-conversation-header{
+  background:#070b12 !important;
+  color:#f8fbff !important;
+  border-bottom:1px solid rgba(255,255,255,.12) !important;
+}
+.inquiry-card .drawer-head strong,
+.admin-conversation-header strong,
+.panel-head h2{
+  background:linear-gradient(90deg,#7df9ff,#8b5cf6,#ff2bd6);
+  -webkit-background-clip:text;
+  background-clip:text;
+  color:transparent;
+}
+#closeInquiryBtn,
+.admin-message-close,
+.inquiry-card .icon-btn{
+  background:rgba(255,255,255,.08) !important;
+  color:#ffffff !important;
+  border:1px solid rgba(255,255,255,.18) !important;
+  opacity:1 !important;
+}
+#closeInquiryBtn:hover,
+.inquiry-card .icon-btn:hover{
+  border-color:#7df9ff !important;
+  box-shadow:0 0 18px rgba(125,249,255,.25);
+}
+.messenger-top-fields,
+.messenger-compose,
+.admin-compose{
+  background:#070b12 !important;
+}
+.messenger-chat-window,
+.admin-chat-window{
+  background:radial-gradient(circle at top left,rgba(0,229,255,.08),transparent 34%),linear-gradient(180deg,#060a12 0%,#03050a 100%) !important;
+  border-color:rgba(255,255,255,.12) !important;
+  color:#f8fbff !important;
+  scrollbar-width:thin;
+  scrollbar-color:#334155 #05070c;
+}
+.messenger-chat-window::-webkit-scrollbar,
+.admin-chat-window::-webkit-scrollbar,
+.admin-conversation-list::-webkit-scrollbar{width:8px}
+.messenger-chat-window::-webkit-scrollbar-thumb,
+.admin-chat-window::-webkit-scrollbar-thumb,
+.admin-conversation-list::-webkit-scrollbar-thumb{background:#334155;border-radius:999px}
+.chat-empty{
+  color:#93a4bd !important;
+  border:1px dashed rgba(125,249,255,.18);
+  border-radius:18px;
+  background:rgba(255,255,255,.03);
+  align-self:center;
+}
+.chat-bubble{
+  box-shadow:0 12px 28px rgba(0,0,0,.22) !important;
+  border:1px solid rgba(255,255,255,.10);
+}
+.chat-bubble.customer{
+  background:linear-gradient(135deg,#123044,#1b1644) !important;
+  color:#ffffff !important;
+  border-color:rgba(125,249,255,.35) !important;
+}
+.chat-bubble.admin{
+  background:#111827 !important;
+  color:#f8fbff !important;
+  border-color:rgba(167,139,250,.35) !important;
+}
+.chat-meta{color:#b8c7da !important;opacity:.85 !important}
+.chat-text{color:inherit !important}
+.chat-image{background:#05070c !important;border:1px solid rgba(255,255,255,.12)}
+.messenger-compose textarea,
+.admin-compose textarea,
+.inquiry-card input,
+.inquiry-card textarea,
+.admin-compose .order-status-select{
+  background:#0b1020 !important;
+  color:#ffffff !important;
+  border:1px solid rgba(255,255,255,.16) !important;
+  box-shadow:inset 0 0 0 1px rgba(255,255,255,.02);
+}
+.messenger-compose textarea:focus,
+.admin-compose textarea:focus,
+.inquiry-card input:focus{
+  border-color:#7df9ff !important;
+  box-shadow:0 0 0 3px rgba(125,249,255,.10);
+  outline:none;
+}
+.inquiry-card input::placeholder,
+.inquiry-card textarea::placeholder,
+.admin-compose textarea::placeholder{color:#7d8798 !important}
+#sendInquiryBtn,
+#sendAdminReplyBtn{
+  background:linear-gradient(180deg,#111827,#020617) !important;
+  color:#ffffff !important;
+  border:1px solid rgba(125,249,255,.55) !important;
+  box-shadow:0 0 20px rgba(0,229,255,.12), inset 0 0 18px rgba(139,92,246,.10) !important;
+}
+#sendInquiryBtn:hover,
+#sendAdminReplyBtn:hover{
+  border-color:#a78bfa !important;
+  box-shadow:0 0 26px rgba(167,139,250,.22), inset 0 0 18px rgba(0,229,255,.12) !important;
+}
+.upload-chip{
+  background:#111827 !important;
+  color:#e5f7ff !important;
+  border-color:rgba(125,249,255,.25) !important;
+}
+.upload-file-name{color:#a8b5c8 !important}
+.chat-image-preview{
+  background:#0b1020 !important;
+  border-color:rgba(255,255,255,.14) !important;
+}
+.chat-image-preview img{background:#05070c !important}
+.mini-remove-btn{background:#1f2937 !important;color:#fff !important;border:1px solid rgba(255,255,255,.14)}
+.admin-messenger{
+  background:#070b12 !important;
+  border-radius:22px;
+}
+.admin-conversation-list,
+.admin-conversation-panel{
+  background:#05070c !important;
+  border-color:rgba(125,249,255,.18) !important;
+  box-shadow:inset 0 0 24px rgba(0,229,255,.03);
+}
+.admin-conversation-item{
+  background:#0b1020 !important;
+  color:#f8fbff !important;
+  border-bottom:1px solid rgba(255,255,255,.08) !important;
+}
+.admin-conversation-item:hover{
+  background:#111827 !important;
+  border-color:rgba(125,249,255,.25) !important;
+}
+.admin-conversation-item.active{
+  background:linear-gradient(135deg,rgba(0,229,255,.16),rgba(139,92,246,.16)) !important;
+  border-left:4px solid #7df9ff !important;
+}
+.admin-conversation-item.unread{border-left:4px solid #a855f7 !important}
+.admin-conversation-name{color:#ffffff !important}
+.admin-conversation-preview{color:#a8b5c8 !important}
+.unread-badge{
+  background:linear-gradient(135deg,#00e5ff,#8b5cf6) !important;
+  color:#020617 !important;
+}
+.chat-quick-row{
+  display:flex;
+  gap:8px;
+  overflow:auto;
+  padding-bottom:2px;
+}
+.chat-quick-row::-webkit-scrollbar{display:none}
+.chat-quick{
+  white-space:nowrap;
+  border:1px solid rgba(125,249,255,.25);
+  background:#0b1020;
+  color:#dffcff;
+  border-radius:999px;
+  padding:8px 11px;
+  font-size:12px;
+  font-weight:800;
+  cursor:pointer;
+}
+.chat-quick:hover{border-color:#a78bfa;background:#111827}
+.chat-pro-note{
+  font-size:12px;
+  color:#9fb1c8;
+  display:flex;
+  align-items:center;
+  gap:6px;
+}
+.admin-compose-actions{align-items:stretch !important}
+.admin-compose-actions select{min-width:130px}
+@media (max-width:560px){
+  .inquiry-modal{align-items:flex-end;padding:0 !important}
+  .inquiry-card{width:100% !important;max-height:92vh !important;border-radius:24px 24px 0 0 !important}
+  .admin-compose-actions{flex-direction:column}
+}
