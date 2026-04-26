@@ -230,6 +230,7 @@ const getLocalMessages = () => readJSON(MESSAGES_KEY, []);
 const setLocalMessages = (items) => writeJSON(MESSAGES_KEY, items);
 function seedLocalIfEmpty(){ if(!getLocalProducts().length){ setLocalProducts(demoProducts.map((item, index) => ({ ...item, id: "p" + (index + 1) }))); } }
 let selectedAdminMessageId = null;
+let adminMessagesCache = [];
 function messageTime(value){
   try{
     if(value && typeof value.toDate === "function") return value.toDate().toLocaleString();
@@ -259,20 +260,53 @@ function renderMessages(messages=[]){
 }
 async function sendAdminReply(){
   const textEl = $("adminReplyText"), statusEl = $("adminMessageStatus");
+  const sendBtn = $("sendAdminReplyBtn");
+
+  if(!selectedAdminMessageId && adminMessagesCache.length){
+    selectedAdminMessageId = adminMessagesCache[0].id;
+  }
   if(!selectedAdminMessageId){ showNotice('Select a customer message first'); return; }
+
   const text = (textEl?.value || '').trim();
   const image = await fileToDataUrl($("adminReplyImage")?.files?.[0]);
   if(!text && !image){ showNotice('Type a reply or add image'); return; }
-  let current = null;
-  if(getMode()==="firebase" && firebaseReady){ const snap = await getDoc(doc(db, "messages", selectedAdminMessageId)); if(snap.exists()) current = { id:snap.id, ...snap.data() }; }
-  else current = getLocalMessages().find(x => x.id === selectedAdminMessageId);
-  if(!current){ showNotice('Conversation not found'); return; }
-  const thread = Array.isArray(current.thread) ? current.thread.slice() : [];
-  thread.push({ sender:'admin', text, image, at:new Date().toISOString() });
-  await updateMessage(selectedAdminMessageId, { thread, reply:text, latestMessage:text || 'Image attachment', status:statusEl?.value || 'Replied', updatedAt:(getMode()==="firebase" && firebaseReady) ? serverTimestamp() : new Date().toISOString() });
-  if(textEl) textEl.value = '';
-  clearFileInput("adminReplyImage", "adminReplyImagePreviewWrap", "adminReplyImagePreview", "adminReplyImageName");
-  showNotice('Reply sent');
+
+  try{
+    if(sendBtn){ sendBtn.disabled = true; sendBtn.textContent = 'Sending...'; }
+    let current = null;
+
+    if(getMode()==="firebase" && firebaseReady){
+      const snap = await getDoc(doc(db, "messages", selectedAdminMessageId));
+      if(snap.exists()) current = { id:snap.id, ...snap.data() };
+    } else {
+      current = getLocalMessages().find(x => x.id === selectedAdminMessageId);
+    }
+
+    if(!current){ showNotice('Conversation not found'); return; }
+
+    const now = new Date().toISOString();
+    const thread = Array.isArray(current.thread) ? current.thread.slice() : [];
+    thread.push({ sender:'admin', text, image, at: now });
+
+    const payload = {
+      thread,
+      reply: text,
+      latestMessage: text || 'Image attachment',
+      status: statusEl?.value || 'Replied',
+      updatedAt: (getMode()==="firebase" && firebaseReady) ? serverTimestamp() : now
+    };
+
+    await updateMessage(selectedAdminMessageId, payload);
+
+    if(textEl) textEl.value = '';
+    clearFileInput("adminReplyImage", "adminReplyImagePreviewWrap", "adminReplyImagePreview", "adminReplyImageName");
+    showNotice('Reply sent');
+  }catch(error){
+    console.error('Admin reply failed:', error);
+    showNotice(error?.message || 'Reply failed. Check Firestore rules for messages update.');
+  }finally{
+    if(sendBtn){ sendBtn.disabled = false; sendBtn.textContent = 'Send Reply'; }
+  }
 }
 function bindNoticeButtons(){ document.querySelectorAll(".js-notice").forEach(btn => btn.onclick = () => showNotice(btn.dataset.text || "Done")); }
 async function fetchFirebaseDocs(col, field=null){ const ref = collection(db, col); const q = field ? query(ref, orderBy(field, "desc")) : ref; const snap = await getDocs(q); return snap.docs.map(d => ({ id:d.id, ...d.data() })); }
@@ -1634,13 +1668,19 @@ function initAdmin(){
 
   if($("adminReplyImage")) $("adminReplyImage").onchange = () => setImagePreview("adminReplyImage", "adminReplyImagePreviewWrap", "adminReplyImagePreview", "adminReplyImageName");
   if($("removeAdminReplyImageBtn")) $("removeAdminReplyImageBtn").onclick = () => clearFileInput("adminReplyImage", "adminReplyImagePreviewWrap", "adminReplyImagePreview", "adminReplyImageName");
-  if($("sendAdminReplyBtn")) $("sendAdminReplyBtn").onclick = sendAdminReply;
+  document.addEventListener("click", (event) => {
+    if(event.target && event.target.id === "sendAdminReplyBtn"){
+      event.preventDefault();
+      sendAdminReply();
+    }
+  });
 
   subscribeProducts((items, source) => { adminProductsCache = items; renderProductsAdmin(items, source); renderPosSearch($("posScanInput")?.value || ""); });
   subscribeOrders((activeOrders, historyOrders) => renderOrders(activeOrders, historyOrders));
   subscribeCustomers((customers) => renderCustomers(customers));
   let __lastAdminMessageCount = 0;
   subscribeMessages((messages) => {
+    adminMessagesCache = messages || [];
     if(messages.length > __lastAdminMessageCount && __lastAdminMessageCount !== 0) playNotificationBeep();
     __lastAdminMessageCount = messages.length;
     renderMessages(messages);

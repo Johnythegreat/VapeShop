@@ -1,33 +1,9 @@
 rules_version = '2';
+
 service cloud.firestore {
   match /databases/{database}/documents {
-    function isSignedIn() { return request.auth != null; }
-    function isAdmin() {
-      return isSignedIn() &&
-        request.auth.token.email in ["fchristian416@gmail.com"];
-    }
-    match /products/{productId} {
-      allow read: if true;
-      allow create, update, delete: if isAdmin();
-    }
-    match /orders/{orderId} {
-      allow create: if true;
-      allow read, update, delete: if isAdmin();
-    }
-    match /order_history/{historyId} {
-      allow read, create, update, delete: if isAdmin();
-    }
-    match /customers_public/{customerId} {
-      allow create, update: if true;
-      allow read, delete: if isAdmin();
-    }
-    match /settings/{settingId} {
-      allow read: if true;
-      allow create, update, delete: if isAdmin();
-    }
-    match /messages/{messageId} {
-      allow create, read, update: if true;
-      allow delete: if isAdmin();
+    match /{document=**} {
+      allow read, write: if true;
     }
   }
 }
