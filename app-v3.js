@@ -498,8 +498,16 @@ function initShop(){
   }
 
   function firstProductImage(p){
-    const imgs = Array.isArray(p?.images) ? p.images.map(x => String(x || "").trim()).filter(Boolean) : [];
-    return imgs[0] || String(p?.image || "").trim();
+    // Main customer image priority:
+    // 1) productImages = extra product images uploaded in Admin
+    // 2) images = saved product gallery
+    // 3) image = legacy single image
+    // 4) variantImages = flavor/color fallback only
+    const productImgs = Array.isArray(p?.productImages) ? p.productImages.map(x => String(x || "").trim()).filter(Boolean) : [];
+    const galleryImgs = Array.isArray(p?.images) ? p.images.map(x => String(x || "").trim()).filter(Boolean) : [];
+    const legacyImg = String(p?.image || "").trim();
+    const variantFallback = (p?.variantImages && typeof p.variantImages === "object") ? Object.values(p.variantImages).map(x => String(x || "").trim()).filter(Boolean)[0] : "";
+    return productImgs[0] || galleryImgs[0] || legacyImg || variantFallback || "";
   }
 
   function renderProducts(){
@@ -517,11 +525,14 @@ function initShop(){
 
     gridEl.innerHTML = filtered.map(p => {
       const cardImage = firstProductImage(p);
+      const previewImages = Array.from(new Set(((Array.isArray(p.productImages) && p.productImages.length ? p.productImages : (Array.isArray(p.images) ? p.images : [])) || []).map(x => String(x || "").trim()).filter(Boolean)));
+      const hoverImage = previewImages[1] || previewImages[0] || cardImage;
       const safeImage = escapeHtml(cardImage);
+      const safeHoverImage = escapeHtml(hoverImage);
       return `
       <article class="card" data-view="${p.id}">
         <div class="thumb ${cardImage ? "has-image" : "no-image"}">
-          ${cardImage ? `<img class="thumb-img" src="${safeImage}" alt="${escapeHtml((p.brand || "") + " " + (p.name || "Product"))}" loading="lazy" onerror="this.closest('.thumb').classList.add('no-image');this.remove();">` : `<div class="thumb-placeholder">MR VAPE SHOP</div>`}
+          ${cardImage ? `<img class="thumb-img" src="${safeImage}" data-main-src="${safeImage}" data-hover-src="${safeHoverImage}" alt="${escapeHtml((p.brand || "") + " " + (p.name || "Product"))}" loading="lazy" onerror="this.closest('.thumb').classList.add('no-image');this.remove();">` : `<div class="thumb-placeholder">MR VAPE SHOP</div>`}
           <div class="badge">${escapeHtml(p.badge || "New")}</div>
           <button class="fav js-notice" data-text="Wishlist feature can be added next">♡</button>
         </div>
@@ -544,6 +555,13 @@ function initShop(){
       </article>
     `;
     }).join("");
+
+    gridEl.querySelectorAll(".thumb-img[data-hover-src]").forEach(img => {
+      const mainSrc = img.dataset.mainSrc || img.src;
+      const hoverSrc = img.dataset.hoverSrc || mainSrc;
+      img.addEventListener("mouseenter", () => { if(hoverSrc && hoverSrc !== img.src) img.src = hoverSrc; });
+      img.addEventListener("mouseleave", () => { if(mainSrc) img.src = mainSrc; });
+    });
 
     bindNoticeButtons();
 
@@ -631,8 +649,9 @@ function initShop(){
       });
     }
     const variantGalleryImages = Object.values(variantImageMap).map(x => String(x || "").trim()).filter(Boolean);
-    const productImages = (Array.isArray(p.images) && p.images.length ? p.images : [firstProductImage(p)]).map(x => String(x || "").trim()).filter(Boolean);
-    const galleryImages = Array.from(new Set(variantGalleryImages.concat(productImages))).filter(Boolean);
+    const productImages = (Array.isArray(p.productImages) && p.productImages.length ? p.productImages : (Array.isArray(p.images) && p.images.length ? p.images : [firstProductImage(p)])).map(x => String(x || "").trim()).filter(Boolean);
+    // Product uploaded images show first. Variant/flavor photos still appear after them.
+    const galleryImages = Array.from(new Set(productImages.concat(variantGalleryImages))).filter(Boolean);
     $("productPageMainImage").src = galleryImages[0] || firstProductImage(p);
     $("productPageBadge").textContent = p.badge || "New";
     const productThumbs = $("productThumbs");
@@ -1174,7 +1193,7 @@ function initAdmin(){
   }
   function updateStats(items){ $("statProducts").textContent = items.length; $("statStock").textContent = items.reduce((a,b)=>a+Number(b.stock||0),0); $("statLow").textContent = items.filter(x=>Number(x.stock||0)<=10).length; $("statCategories").textContent = new Set(items.map(x=>x.category)).size; }
   function clearForm(){ form.reset(); $("docId").value = ""; if($("variants")) $("variants").value = ""; if($("variantImages")) $("variantImages").value = "{}"; if($("image")) $("image").value = ""; window.__pendingProductImages = [""]; setTimeout(() => { window.hydrateVariantRows && window.hydrateVariantRows(null); window.hydrateProductImageRows && window.hydrateProductImageRows([""]); }, 0); }
-  function fillForm(item){ $("docId").value=item.id; $("name").value=item.name||""; $("brand").value=item.brand||""; $("category").value=item.category||"Pods"; $("price").value=item.price||0; $("oldPrice").value=item.oldPrice||0; $("stock").value=item.stock||0; $("sold").value=item.sold||""; $("badge").value=item.badge||""; if($("variants")) $("variants").value = Array.isArray(item.variants) ? item.variants.join("\n") : ""; if($("variantImages")) $("variantImages").value = JSON.stringify(item.variantImages || {}); const variantImgs = item.variantImages && typeof item.variantImages === "object" ? Object.values(item.variantImages).filter(Boolean) : []; const allImgs = (Array.isArray(item.images) && item.images.length ? item.images : [item.image]).filter(Boolean); const extraImgs = allImgs.filter(img => !variantImgs.includes(img)); if($("image")) $("image").value = allImgs[0] || ""; window.__pendingProductImages = extraImgs.length ? extraImgs : [""]; setTimeout(() => { window.hydrateVariantRows && window.hydrateVariantRows(item); window.hydrateProductImageRows && window.hydrateProductImageRows(window.__pendingProductImages); }, 0); window.scrollTo({top:0, behavior:"smooth"}); }
+  function fillForm(item){ $("docId").value=item.id; $("name").value=item.name||""; $("brand").value=item.brand||""; $("category").value=item.category||"Pods"; $("price").value=item.price||0; $("oldPrice").value=item.oldPrice||0; $("stock").value=item.stock||0; $("sold").value=item.sold||""; $("badge").value=item.badge||""; if($("variants")) $("variants").value = Array.isArray(item.variants) ? item.variants.join("\n") : ""; if($("variantImages")) $("variantImages").value = JSON.stringify(item.variantImages || {}); const variantImgs = item.variantImages && typeof item.variantImages === "object" ? Object.values(item.variantImages).filter(Boolean) : []; const productImgs = Array.isArray(item.productImages) && item.productImages.length ? item.productImages.filter(Boolean) : []; const allImgs = (productImgs.length ? productImgs : (Array.isArray(item.images) && item.images.length ? item.images : [item.image]).filter(Boolean)); const extraImgs = productImgs.length ? productImgs : allImgs.filter(img => !variantImgs.includes(img)); if($("image")) $("image").value = extraImgs[0] || allImgs[0] || ""; window.__pendingProductImages = extraImgs.length ? extraImgs : [""]; setTimeout(() => { window.hydrateVariantRows && window.hydrateVariantRows(item); window.hydrateProductImageRows && window.hydrateProductImageRows(window.__pendingProductImages); }, 0); window.scrollTo({top:0, behavior:"smooth"}); }
   function renderProductsAdmin(items, source){ $("adminSourceLabel").textContent = source==="firebase" ? "Live from Firebase" : "Using local fallback"; updateStats(items); if(!items.length){ table.innerHTML = '<tr><td colspan="5" class="empty">No products found.</td></tr>'; return; } table.innerHTML = items.map(item => `<tr><td><div style="font-weight:800">${escapeHtml(item.name)}</div><div class="small">${escapeHtml(item.brand)}</div></td><td>${escapeHtml(item.category)}</td><td>${money(item.price)}</td><td>${Number(item.stock||0)}</td><td><div class="row-actions"><button class="btn ghost" data-edit="${item.id}">Edit</button><button class="btn dark" data-delete="${item.id}">Delete</button></div></td></tr>`).join(""); table.querySelectorAll("[data-edit]").forEach(btn => btn.onclick = () => { const item = items.find(x => x.id===btn.dataset.edit); if(item) fillForm(item); }); table.querySelectorAll("[data-delete]").forEach(btn => btn.onclick = async () => { try { await deleteProductItem(btn.dataset.delete); showNotice("Product deleted"); } catch { showNotice("Delete failed"); } }); }
   function receiptNumber(order){
     if(order && order.receiptNo) return String(order.receiptNo);
@@ -1403,8 +1422,9 @@ function initAdmin(){
       variantImages:(window.getVariantData ? window.getVariantData().variantImages : {}),
       variantStocks:(window.getVariantData ? window.getVariantData().variantStocks : {}),
       variantPhotoList:(window.getVariantData ? window.getVariantData().variantPhotoList : []),
-      image:(function(){ const vd = window.getVariantData ? window.getVariantData() : {variantPhotoList:[]}; const extra = window.getProductImageUrls ? window.getProductImageUrls() : [$("image").value.trim()]; return (vd.variantPhotoList[0]?.image || extra[0] || ""); })(),
-      images:(function(){ const vd = window.getVariantData ? window.getVariantData() : {variantPhotoList:[]}; const variantImgs = (vd.variantPhotoList || []).map(v => v.image).filter(Boolean); const extra = (window.getProductImageUrls ? window.getProductImageUrls() : [$("image").value.trim()]).filter(Boolean); return Array.from(new Set(variantImgs.concat(extra))); })()
+      image:(function(){ const extra = (window.getProductImageUrls ? window.getProductImageUrls() : [$("image").value.trim()]).filter(Boolean); const vd = window.getVariantData ? window.getVariantData() : {variantPhotoList:[]}; const variantImgs = (vd.variantPhotoList || []).map(v => v.image).filter(Boolean); return (extra[0] || variantImgs[0] || ""); })(),
+      productImages:(function(){ const extra = (window.getProductImageUrls ? window.getProductImageUrls() : [$("image").value.trim()]).filter(Boolean); return Array.from(new Set(extra)); })(),
+      images:(function(){ const vd = window.getVariantData ? window.getVariantData() : {variantPhotoList:[]}; const variantImgs = (vd.variantPhotoList || []).map(v => v.image).filter(Boolean); const extra = (window.getProductImageUrls ? window.getProductImageUrls() : [$("image").value.trim()]).filter(Boolean); return Array.from(new Set(extra.concat(variantImgs))); })()
     }; try { await saveProduct(payload, docId || null); clearForm(); showNotice("Product saved"); } catch { showNotice("Save failed"); } };
   $("clearFormBtn").onclick = clearForm;
   $("seedBtn").onclick = async () => { try { await seedProducts(); showNotice("Demo products added"); } catch (error) { showNotice(error.message || "Seed failed"); } };

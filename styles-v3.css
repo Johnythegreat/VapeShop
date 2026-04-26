@@ -1017,3 +1017,11 @@ html,body{background:radial-gradient(circle at top,#182033 0,#05070c 45%,#030407
 .card:hover .thumb-img {
   transform: scale(1.04);
 }
+
+/* Better customer product card hover preview */
+.card .thumb-img[data-hover-src]{
+  cursor:pointer;
+}
+.card:hover .thumb-img[data-hover-src]{
+  filter:brightness(1.05) contrast(1.03);
+}
