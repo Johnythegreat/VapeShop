@@ -497,7 +497,7 @@ function initShop(){
     });
   }
 
-  function firstProductImage(p){
+  (product.images && product.images[0]) || product.image || ""
     const imgs = Array.isArray(p?.images) ? p.images.map(x => String(x || "").trim()).filter(Boolean) : [];
     return imgs[0] || String(p?.image || "").trim();
   }
