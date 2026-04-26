@@ -265,9 +265,18 @@ async function saveCustomerProfile(account){
 async function createOrder(cart, account, shippingInfo={}){
   if(getMode()==="firebase" && firebaseReady){
     await runTransaction(db, async (transaction) => {
-      const liveItems = [];
+      // Firestore transactions require all reads before any writes.
+      const productReads = [];
       for(const item of cart){
-        const ref = doc(db, "products", item.id); const snap = await transaction.get(ref);
+        const ref = doc(db, "products", item.id);
+        const snap = await transaction.get(ref);
+        productReads.push({ item, ref, snap });
+      }
+
+      const liveItems = [];
+      const productUpdates = [];
+      for(const row of productReads){
+        const { item, ref, snap } = row;
         if(!snap.exists()) throw new Error(item.name + " not found");
         const data = snap.data();
         const qty = Number(item.qty || 0);
@@ -277,14 +286,16 @@ async function createOrder(cart, account, shippingInfo={}){
           const vStock = Number(variantStocks[selectedVariant] || 0);
           if(vStock < qty) throw new Error("Not enough stock for " + item.name + " - " + selectedVariant);
           variantStocks[selectedVariant] = vStock - qty;
-          transaction.update(ref, { variantStocks, stock: sumVariantStocks(variantStocks) });
+          productUpdates.push({ ref, payload:{ variantStocks, stock: sumVariantStocks(variantStocks) } });
         } else {
           const stock = Number(data.stock || 0);
           if(stock < qty) throw new Error("Not enough stock for " + item.name);
-          transaction.update(ref, { stock: stock - qty });
+          productUpdates.push({ ref, payload:{ stock: stock - qty } });
         }
         liveItems.push({ name:data.name, qty, price:Number(data.price), productId:item.id, size:selectedVariant, image:item.image || "" });
       }
+
+      productUpdates.forEach(u => transaction.update(u.ref, u.payload));
       const orderRef = doc(collection(db, "orders"));
       transaction.set(orderRef, { customer:account, items:liveItems, subtotal:cartSubtotal(liveItems), shippingFee:Number(shippingInfo.fee || 0), shippingZone:shippingInfo.zone || "", total:totalAmount(liveItems, shippingInfo.fee), status:"Pending", createdAt:serverTimestamp() });
     });
@@ -1192,6 +1203,7 @@ function initShop(){
   $("navCart").onclick = () => openDrawer("cart");
   $("navAccount").onclick = () => openDrawer("account");
   if($("navTrack")) $("navTrack").onclick = () => openTrackingModal(account.phone || "");
+  if($("openTrackTopBtn")) $("openTrackTopBtn").onclick = () => openTrackingModal(account.phone || "");
   if($("closeTrackingBtn")) $("closeTrackingBtn").onclick = closeTrackingModal;
   if($("trackingSearchBtn")) $("trackingSearchBtn").onclick = trackOrder;
   if($("trackingInput")) $("trackingInput").addEventListener("keydown", (e) => { if(e.key === "Enter") trackOrder(); });
@@ -1257,9 +1269,17 @@ async function createPosSale(cart, account={}, payment={}){
   if(getMode()==="firebase" && firebaseReady){
     let orderId = receiptNo;
     await runTransaction(db, async (transaction) => {
+      // Firestore transactions require all reads before any writes.
+      const productReads = [];
       for(const item of cart){
         const ref = doc(db, "products", item.id);
         const snap = await transaction.get(ref);
+        productReads.push({ item, ref, snap });
+      }
+
+      const productUpdates = [];
+      for(const row of productReads){
+        const { item, ref, snap } = row;
         if(!snap.exists()) throw new Error(item.name + " not found");
         const data = snap.data();
         const qty = Number(item.qty || 1);
@@ -1269,13 +1289,15 @@ async function createPosSale(cart, account={}, payment={}){
           const current = Number(variantStocks[selectedVariant] || 0);
           if(current < qty) throw new Error("Not enough stock for " + item.name + " - " + selectedVariant);
           variantStocks[selectedVariant] = current - qty;
-          transaction.update(ref, { variantStocks, stock: sumVariantStocks(variantStocks) });
+          productUpdates.push({ ref, payload:{ variantStocks, stock: sumVariantStocks(variantStocks) } });
         } else {
           const stock = Number(data.stock || 0);
           if(stock < qty) throw new Error("Not enough stock for " + item.name);
-          transaction.update(ref, { stock: stock - qty });
+          productUpdates.push({ ref, payload:{ stock: stock - qty } });
         }
       }
+
+      productUpdates.forEach(u => transaction.update(u.ref, u.payload));
       const orderRef = doc(collection(db, "order_history"));
       orderId = orderRef.id;
       transaction.set(orderRef, { ...orderPayload, createdAt:serverTimestamp(), paidAt:serverTimestamp(), movedAt:serverTimestamp() });
