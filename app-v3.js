@@ -1,5 +1,5 @@
 import { db, auth, firebaseReady, ADMIN_EMAILS } from "./firebase-config.js";
-import { collection, addDoc, doc, updateDoc, deleteDoc, getDocs, onSnapshot, serverTimestamp, query, orderBy, runTransaction, writeBatch, setDoc } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+import { collection, addDoc, doc, updateDoc, deleteDoc, getDocs, getDoc, onSnapshot, serverTimestamp, query, orderBy, runTransaction, writeBatch, setDoc } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import { signInWithEmailAndPassword, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 
 const page = document.body.dataset.page;
@@ -9,6 +9,7 @@ const ACCOUNT_KEY = "vape_shop_account";
 const CUSTOMERS_KEY = "vape_shop_customers";
 const ORDERS_KEY = "vape_shop_orders";
 const HISTORY_KEY = "vape_shop_order_history";
+const SHIPPING_SETTINGS_KEY = "vape_shop_shipping_settings";
 const MESSAGES_KEY = "vape_shop_messages";
 const CHAT_ID_KEY = "vape_shop_chat_id";
 const CUSTOMER_LAST_SEEN_KEY = "vape_shop_customer_last_seen";
@@ -86,7 +87,29 @@ const $ = (id) => document.getElementById(id);
 const readJSON = (k, f) => { try { const r = localStorage.getItem(k); return r ? JSON.parse(r) : f; } catch { return f; } };
 const writeJSON = (k, v) => localStorage.setItem(k, JSON.stringify(v));
 const money = (v) => "₱" + Number(v || 0).toLocaleString();
-const totalAmount = (items) => items.reduce((s, i) => s + Number(i.price) * Number(i.qty), 0) + (items.length ? 60 : 0);
+const cartSubtotal = (items) => items.reduce((s, i) => s + Number(i.price) * Number(i.qty), 0);
+const totalAmount = (items, shippingFee = 0) => cartSubtotal(items) + Number(shippingFee || 0);
+const defaultShippingSettings = { enabled:true, pickupEnabled:true, freeShippingMin:0, zones:[{ name:"Store Pickup", fee:0 }, { name:"Davao City", fee:60 }, { name:"Outside Davao", fee:100 }] };
+function normalizeShippingSettings(settings={}){
+  const rawZones = Array.isArray(settings.zones) ? settings.zones : defaultShippingSettings.zones;
+  const zones = rawZones.map(z => ({ name:String(z?.name || "").trim(), fee:Number(z?.fee || 0) })).filter(z => z.name);
+  return { enabled:settings.enabled !== false, pickupEnabled:settings.pickupEnabled !== false, freeShippingMin:Math.max(0, Number(settings.freeShippingMin || 0)), zones:zones.length ? zones : defaultShippingSettings.zones.slice() };
+}
+function getLocalShippingSettings(){ return normalizeShippingSettings(readJSON(SHIPPING_SETTINGS_KEY, defaultShippingSettings)); }
+function setLocalShippingSettings(settings){ writeJSON(SHIPPING_SETTINGS_KEY, normalizeShippingSettings(settings)); }
+async function loadShippingSettings(){
+  const local = getLocalShippingSettings();
+  if(getMode()==="firebase" && firebaseReady){
+    try{ const snap = await getDoc(doc(db, "settings", "shipping")); if(snap.exists()) return normalizeShippingSettings(snap.data()); await setDoc(doc(db, "settings", "shipping"), { ...local, updatedAt:serverTimestamp() }); }catch{}
+  }
+  return local;
+}
+async function saveShippingSettings(settings){
+  const clean = normalizeShippingSettings(settings);
+  setLocalShippingSettings(clean);
+  if(getMode()==="firebase" && firebaseReady) await setDoc(doc(db, "settings", "shipping"), { ...clean, updatedAt:serverTimestamp() });
+  return clean;
+}
 const variantStockMap = (p) => (p && p.variantStocks && typeof p.variantStocks === "object") ? p.variantStocks : {};
 const getVariantStock = (p, variant) => {
   const map = variantStockMap(p);
@@ -238,7 +261,7 @@ async function saveCustomerProfile(account){
   if(getMode()==="firebase" && firebaseReady && account.phone){ await setDoc(doc(db, "customers_public", account.phone), { ...account, updatedAt: serverTimestamp() }, { merge:true }); }
   const customers = getLocalCustomers(); const idx = customers.findIndex(c => c.phone === account.phone && account.phone); if(idx >= 0) customers[idx] = account; else customers.unshift(account); setLocalCustomers(customers);
 }
-async function createOrder(cart, account){
+async function createOrder(cart, account, shippingInfo={}){
   if(getMode()==="firebase" && firebaseReady){
     await runTransaction(db, async (transaction) => {
       const liveItems = [];
@@ -262,7 +285,7 @@ async function createOrder(cart, account){
         liveItems.push({ name:data.name, qty, price:Number(data.price), productId:item.id, size:selectedVariant, image:item.image || "" });
       }
       const orderRef = doc(collection(db, "orders"));
-      transaction.set(orderRef, { customer:account, items:liveItems, total:totalAmount(liveItems), status:"Pending", createdAt:serverTimestamp() });
+      transaction.set(orderRef, { customer:account, items:liveItems, subtotal:cartSubtotal(liveItems), shippingFee:Number(shippingInfo.fee || 0), shippingZone:shippingInfo.zone || "", total:totalAmount(liveItems, shippingInfo.fee), status:"Pending", createdAt:serverTimestamp() });
     });
     return;
   }
@@ -280,7 +303,7 @@ async function createOrder(cart, account){
   }
   setLocalProducts(products);
   const orders = getLocalOrders();
-  orders.unshift({ id:"ORD-" + Date.now(), customer:account, items:cart.map(i => ({ name:i.name, qty:Number(i.qty), price:Number(i.price), size:i.size || "M" })), total:totalAmount(cart), status:"Pending", createdAt:new Date().toISOString() });
+  orders.unshift({ id:"ORD-" + Date.now(), customer:account, items:cart.map(i => ({ name:i.name, qty:Number(i.qty), price:Number(i.price), size:i.size || "M" })), subtotal:cartSubtotal(cart), shippingFee:Number(shippingInfo.fee || 0), shippingZone:shippingInfo.zone || "", total:totalAmount(cart, shippingInfo.fee), status:"Pending", createdAt:new Date().toISOString() });
   setLocalOrders(orders);
 }
 async function updateOrderStatus(orderId, newStatus, activeOrdersCache=[]){
@@ -449,6 +472,8 @@ function initShop(){
   let selectedProduct = null;
   let selectedSize = null;
   let detailQty = 1;
+  let shippingSettings = getLocalShippingSettings();
+  let selectedShippingZone = readJSON("vape_shop_selected_shipping_zone", "");
 
   const chipsEl = $("chips");
   const gridEl = $("productGrid");
@@ -735,10 +760,22 @@ function initShop(){
     showNotice("Item removed");
   }
 
+  function getSelectedShipping(){
+    if(!cart.length || shippingSettings.enabled === false) return { zone:"", fee:0 };
+    const zones = Array.isArray(shippingSettings.zones) && shippingSettings.zones.length ? shippingSettings.zones : defaultShippingSettings.zones;
+    if(!selectedShippingZone || !zones.some(z => z.name === selectedShippingZone)) selectedShippingZone = zones[0]?.name || "";
+    const zone = zones.find(z => z.name === selectedShippingZone) || zones[0] || { name:"Delivery", fee:0 };
+    const subtotal = cartSubtotal(cart);
+    const freeMin = Number(shippingSettings.freeShippingMin || 0);
+    const fee = freeMin > 0 && subtotal >= freeMin ? 0 : Number(zone.fee || 0);
+    return { zone:zone.name, fee };
+  }
+
   function renderCart(){
-    const subtotal = cart.reduce((sum, item) => sum + Number(item.price) * Number(item.qty), 0);
-    const shipping = cart.length ? 20: 0;
-    const total = subtotal + shipping;
+    const subtotal = cartSubtotal(cart);
+    const shippingInfo = getSelectedShipping();
+    const shipping = shippingInfo.fee;
+    const total = totalAmount(cart, shipping);
 
     if(!cart.length){
       cartView.innerHTML = '<div class="empty">Your cart is empty.</div>';
@@ -766,8 +803,10 @@ function initShop(){
       `).join("")}
       <div style="height:14px"></div>
       <div class="summary">
+        ${shippingSettings.enabled !== false ? `<label class="shipping-select-label">Delivery Zone<select id="shippingZoneSelect">${(shippingSettings.zones || []).map(z => `<option value="${escapeHtml(z.name)}" ${z.name === shippingInfo.zone ? "selected" : ""}>${escapeHtml(z.name)} - ${money(z.fee)}</option>`).join("")}</select></label>` : ""}
+        ${Number(shippingSettings.freeShippingMin || 0) > 0 ? `<div class="small">Free delivery from ${money(shippingSettings.freeShippingMin)}</div>` : ""}
         <div class="summary-row"><span>Subtotal</span><strong>${money(subtotal)}</strong></div>
-        <div class="summary-row"><span>Delivery Fee</span><strong>${money(shipping)}</strong></div>
+        <div class="summary-row"><span>${shippingInfo.zone ? "Delivery Fee (" + escapeHtml(shippingInfo.zone) + ")" : "Delivery Fee"}</span><strong>${money(shipping)}</strong></div>
         <div class="summary-row" style="font-size:18px"><span>Total</span><strong>${money(total)}</strong></div>
         <button class="btn dark" style="width:100%;margin-top:10px" id="checkoutBtn">Checkout</button>
       </div>
@@ -776,6 +815,8 @@ function initShop(){
     cartView.querySelectorAll("[data-minus]").forEach(btn => btn.onclick = () => changeCartQtyByKey(btn.dataset.minus, btn.dataset.size, -1));
     cartView.querySelectorAll("[data-plus]").forEach(btn => btn.onclick = () => changeCartQtyByKey(btn.dataset.plus, btn.dataset.size, 1));
     cartView.querySelectorAll("[data-remove]").forEach(btn => btn.onclick = () => removeItem(btn.dataset.remove, btn.dataset.size));
+    const zoneSelect = $("shippingZoneSelect");
+    if(zoneSelect) zoneSelect.onchange = () => { selectedShippingZone = zoneSelect.value; writeJSON("vape_shop_selected_shipping_zone", selectedShippingZone); renderCart(); };
     $("checkoutBtn").onclick = checkout;
   }
 
@@ -839,7 +880,7 @@ function initShop(){
     }
     try {
       await saveCustomerProfile(account);
-      await createOrder(cart, account);
+      await createOrder(cart, account, getSelectedShipping());
       cart = [];
       writeJSON(CART_KEY, cart);
       renderCart();
@@ -991,6 +1032,8 @@ function initShop(){
     }
   });
 
+  loadShippingSettings().then(settings => { shippingSettings = settings; renderCart(); }).catch(() => renderCart());
+
   renderChips();
   renderCart();
   bindNoticeButtons();
@@ -1052,10 +1095,13 @@ async function createPosSale(cart, account={}, payment={}){
     size:item.size || item.variant || "Default",
     image:item.image || ""
   }));
-  const total = totalAmount(cleanItems);
+  const total = totalAmount(cleanItems, 0);
   const orderPayload = {
     customer:{ name:account.name || "Walk-in Customer", phone:account.phone || "", address:account.address || "" },
     items:cleanItems,
+    subtotal:cartSubtotal(cleanItems),
+    shippingFee:0,
+    shippingZone:"Walk-in / POS",
     total,
     status:"Completed",
     paymentStatus:"Paid",
@@ -1116,7 +1162,7 @@ async function createPosSale(cart, account={}, payment={}){
 }
 
 function initAdmin(){
-  bindNoticeButtons(); const form = $("productForm"), table = $("adminProductTable"); let activeOrdersCache = []; let adminProductsCache = []; let posCart = []; let selectedPosProduct = null;
+  bindNoticeButtons(); const form = $("productForm"), table = $("adminProductTable"); let activeOrdersCache = []; let adminProductsCache = []; let posCart = []; let selectedPosProduct = null; let adminShippingSettings = getLocalShippingSettings();
   const topActions = document.querySelector(".top-actions-wrap");
   if(topActions && !document.getElementById("logoutAdminBtn")){
     const logoutBtn = document.createElement("button");
@@ -1144,7 +1190,7 @@ function initAdmin(){
     if(!order){ showNotice("Order not found"); return; }
     const items = Array.isArray(order.items) ? order.items : [];
     const subtotal = items.reduce((sum, item) => sum + Number(item.price || 0) * Number(item.qty || 0), 0);
-    const shipping = Math.max(0, Number(order.total || 0) - subtotal);
+    const shipping = Number(order.shippingFee ?? Math.max(0, Number(order.total || 0) - subtotal));
     const total = Number(order.total || subtotal + shipping || 0);
     const cashReceived = Number(order.cashReceived || 0);
     const change = Math.max(0, Number(order.change || (cashReceived ? cashReceived - total : 0)));
@@ -1163,7 +1209,7 @@ function initAdmin(){
       :root{--paper:80mm}*{box-sizing:border-box}body{font-family:Arial,Helvetica,sans-serif;margin:0;color:#111;background:#f3f4f6}.toolbar{position:sticky;top:0;background:#0b1220;color:white;padding:10px;display:flex;gap:8px;justify-content:center;flex-wrap:wrap}.toolbar button{border:0;border-radius:10px;padding:10px 12px;font-weight:800;cursor:pointer}.toolbar .primary{background:#111827;color:#fff;border:1px solid #374151}.toolbar .light{background:#fff;color:#111}.receipt{width:var(--paper);max-width:100%;margin:14px auto;background:#fff;padding:12px 10px;box-shadow:0 10px 30px rgba(0,0,0,.18)}.center{text-align:center}.shop{font-size:18px;font-weight:900;letter-spacing:.5px}.tag{font-size:11px;text-transform:uppercase;letter-spacing:1.2px}.muted{font-size:11px;color:#444;line-height:1.45}.paid{font-size:13px;font-weight:900;border:2px solid #111;display:inline-block;padding:5px 16px;margin:8px 0 2px;border-radius:999px}hr{border:0;border-top:1px dashed #777;margin:10px 0}table{width:100%;border-collapse:collapse;font-size:11px}th{font-size:10px;text-transform:uppercase;text-align:left;border-bottom:1px solid #111;padding:4px 0}td{padding:5px 0;border-bottom:1px dashed #ddd;vertical-align:top}.num{width:14px}.qty{text-align:center;width:22px}.money-cell{text-align:right;white-space:nowrap}.item-name span{font-size:10px;color:#555}.summary td{border:0;padding:3px 0}.summary .grand td{font-size:15px;font-weight:900;border-top:1px dashed #777;padding-top:7px}.barcode{font-family:"Courier New",monospace;font-size:12px;letter-spacing:2px;border:1px solid #111;padding:6px;margin:8px 0 2px;word-break:break-all}.footer{font-size:11px;line-height:1.5}.copy{font-size:10px;color:#666}@page{size:80mm auto;margin:4mm}@media print{body{background:#fff}.toolbar{display:none}.receipt{width:80mm;margin:0;box-shadow:none;padding:0 2mm}body.print-58 .receipt{width:58mm}@page{margin:2mm}}
     </style></head><body><div class="toolbar no-print"><button class="primary" onclick="window.print()">🧾 Print Receipt</button><button class="light" onclick="document.body.classList.toggle('print-58');document.documentElement.style.setProperty('--paper',document.body.classList.contains('print-58')?'58mm':'80mm')">58mm / 80mm</button><button class="light" onclick="window.close()">Close</button></div><div class="receipt">
       <div class="center"><div class="shop">MR VAPE SHOP</div><div class="tag">Official POS Receipt</div><div class="paid">PAID</div></div><hr>
-      <div class="muted"><strong>Receipt No:</strong> ${escapeHtml(receiptNo)}<br><strong>Order ID:</strong> ${escapeHtml(order.id || "-")}<br><strong>Date:</strong> ${escapeHtml(dateText)}<br><strong>Cashier:</strong> ${escapeHtml(order.cashier || "Admin POS")}<br><strong>Customer:</strong> ${escapeHtml(order.customer?.name || "Walk-in Customer")}<br><strong>Phone:</strong> ${escapeHtml(order.customer?.phone || "-")}</div><hr>
+      <div class="muted"><strong>Receipt No:</strong> ${escapeHtml(receiptNo)}<br><strong>Order ID:</strong> ${escapeHtml(order.id || "-")}<br><strong>Date:</strong> ${escapeHtml(dateText)}<br><strong>Cashier:</strong> ${escapeHtml(order.cashier || "Admin POS")}<br><strong>Customer:</strong> ${escapeHtml(order.customer?.name || "Walk-in Customer")}<br><strong>Phone:</strong> ${escapeHtml(order.customer?.phone || "-")}<br><strong>Delivery:</strong> ${escapeHtml(order.shippingZone || (shipping ? "Delivery" : "Walk-in / Pickup"))}</div><hr>
       <table><thead><tr><th>#</th><th>Item</th><th>Qty</th><th style="text-align:right">Price</th><th style="text-align:right">Total</th></tr></thead><tbody>${rowsHtml}</tbody></table><hr>
       <table class="summary"><tr><td>Subtotal</td><td class="money-cell">${money(subtotal)}</td></tr><tr><td>Shipping/Fee</td><td class="money-cell">${money(shipping)}</td></tr><tr><td>Payment</td><td class="money-cell">${escapeHtml(order.paymentMethod || "Cash")}</td></tr>${cashReceived ? `<tr><td>Cash Received</td><td class="money-cell">${money(cashReceived)}</td></tr><tr><td>Change</td><td class="money-cell">${money(change)}</td></tr>` : ""}<tr class="grand"><td>TOTAL</td><td class="money-cell">${money(total)}</td></tr></table>
       <hr><div class="center"><div class="barcode">*${escapeHtml(receiptNo)}*</div><div class="footer">Thank you for shopping with us!<br>Please keep this receipt for reference.</div><div class="copy">Powered by MR VAPE SHOP POS</div></div>
@@ -1217,6 +1263,50 @@ function initAdmin(){
   }
 
   function renderCustomers(customers){ const tbody = $("customersTable"); if(!tbody) return; if(!customers.length){ tbody.innerHTML = '<tr><td colspan="4" class="empty">No customers yet.</td></tr>'; return; } tbody.innerHTML = customers.map(customer => `<tr><td>${escapeHtml(customer.name||"-")}</td><td>${escapeHtml(customer.phone||"-")}</td><td>${escapeHtml(customer.email||"-")}</td><td>${escapeHtml(customer.address||"-")}</td></tr>`).join(""); }
+
+  function addShippingZoneRow(name="", fee=0){
+    const wrap = $("shippingZoneRows");
+    if(!wrap) return;
+    const row = document.createElement("div");
+    row.className = "shipping-zone-row";
+    row.innerHTML = `<input class="shipping-zone-name" placeholder="Zone name e.g. Davao City" value="${escapeHtml(name)}"><input class="shipping-zone-fee" type="number" min="0" placeholder="Fee" value="${Number(fee || 0)}"><button class="btn ghost" type="button">Remove</button>`;
+    row.querySelector("button").onclick = () => { row.remove(); if(!document.querySelectorAll("#shippingZoneRows .shipping-zone-row").length) addShippingZoneRow("", 0); };
+    wrap.appendChild(row);
+  }
+  function renderShippingAdmin(settings=adminShippingSettings){
+    adminShippingSettings = normalizeShippingSettings(settings);
+    if(!$("shippingEnabled")) return;
+    $("shippingEnabled").checked = adminShippingSettings.enabled !== false;
+    $("shippingPickupEnabled").checked = adminShippingSettings.pickupEnabled !== false;
+    $("freeShippingMin").value = Number(adminShippingSettings.freeShippingMin || 0);
+    const wrap = $("shippingZoneRows");
+    if(wrap){ wrap.innerHTML = ""; adminShippingSettings.zones.forEach(z => addShippingZoneRow(z.name, z.fee)); }
+  }
+  function collectShippingAdmin(){
+    const zones = Array.from(document.querySelectorAll("#shippingZoneRows .shipping-zone-row")).map(row => ({
+      name:(row.querySelector(".shipping-zone-name")?.value || "").trim(),
+      fee:Number(row.querySelector(".shipping-zone-fee")?.value || 0)
+    })).filter(z => z.name);
+    if($("shippingPickupEnabled")?.checked && !zones.some(z => z.name.toLowerCase().includes("pickup"))) zones.unshift({ name:"Store Pickup", fee:0 });
+    return normalizeShippingSettings({
+      enabled:$("shippingEnabled")?.checked !== false,
+      pickupEnabled:$("shippingPickupEnabled")?.checked !== false,
+      freeShippingMin:Number($("freeShippingMin")?.value || 0),
+      zones
+    });
+  }
+  async function setupShippingAdmin(){
+    if(!$("shippingZoneRows")) return;
+    try{ adminShippingSettings = await loadShippingSettings(); }catch{}
+    renderShippingAdmin(adminShippingSettings);
+    $("addShippingZoneBtn") && ($("addShippingZoneBtn").onclick = () => addShippingZoneRow("", 0));
+    $("saveShippingSettingsBtn") && ($("saveShippingSettingsBtn").onclick = async () => {
+      try{ adminShippingSettings = await saveShippingSettings(collectShippingAdmin()); renderShippingAdmin(adminShippingSettings); showNotice("Shipping zones saved"); }
+      catch(error){ showNotice(error.message || "Shipping save failed"); }
+    });
+    $("resetShippingSettingsBtn") && ($("resetShippingSettingsBtn").onclick = () => { adminShippingSettings = defaultShippingSettings; renderShippingAdmin(adminShippingSettings); showNotice("Default shipping loaded"); });
+  }
+
   function switchTab(tabName){ document.querySelectorAll(".admin-tab-panel").forEach(panel => panel.classList.add("hidden")); const target = $("tab-"+tabName); if(target) target.classList.remove("hidden"); document.querySelectorAll(".admin-tab-btn").forEach(btn => btn.classList.toggle("active", btn.dataset.tab===tabName)); }
 
   function posProductCode(product){ return String(product.barcode || product.sku || product.id || ""); }
@@ -1241,7 +1331,7 @@ function initAdmin(){
   }
   function renderPosCart(){
     const view = $("posCartView"), count = $("posCartCount"), totalEl = $("posTotal"), changeEl = $("posChange");
-    const total = totalAmount(posCart);
+    const total = totalAmount(posCart, 0);
     if(count) count.textContent = posCart.length + (posCart.length === 1 ? " item" : " items");
     if(totalEl) totalEl.textContent = money(total);
     const cash = Number($("posCash")?.value || 0);
@@ -1272,7 +1362,7 @@ function initAdmin(){
     clearBtn && (clearBtn.onclick = () => { posCart = []; selectedPosProduct = null; selectPosProduct(null); if(scan) scan.value = ""; renderPosSearch(""); renderPosCart(); });
     payBtn.onclick = async () => {
       if(!posCart.length){ showNotice("POS cart is empty"); return; }
-      const total = totalAmount(posCart);
+      const total = totalAmount(posCart, 0);
       const cashReceived = Number($("posCash")?.value || total);
       const method = $("posPaymentMethod")?.value || "Cash";
       if(method === "Cash" && cashReceived < total){ showNotice("Cash received is lower than total"); return; }
@@ -1298,6 +1388,7 @@ function initAdmin(){
   });
   document.querySelectorAll(".admin-tab-btn").forEach(btn => btn.onclick = () => switchTab(btn.dataset.tab));
   setupBarcodePos();
+  setupShippingAdmin();
   switchTab("products");
   form.onsubmit = async (e) => { e.preventDefault(); const docId = $("docId").value.trim(); const payload = {
       name:$("name").value.trim(),

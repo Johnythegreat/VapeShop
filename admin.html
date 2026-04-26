@@ -16,6 +16,7 @@
       <button class="side-link admin-tab-btn" type="button" data-tab="pos">Barcode POS</button>
       <button class="side-link admin-tab-btn" type="button" data-tab="customers">Customers</button>
       <button class="side-link admin-tab-btn" type="button" data-tab="messages">Messages</button>
+      <button class="side-link admin-tab-btn" type="button" data-tab="shipping">Shipping Zones</button>
       <button class="side-link admin-tab-btn" type="button" data-tab="agegate">18+ Gate</button>
     </aside>
 
@@ -281,6 +282,45 @@
         </section>
       </div>
 
+
+
+      <div id="tab-shipping" class="admin-tab-panel hidden">
+        <section class="panel">
+          <div class="panel-head">
+            <h2>Shipping / Delivery Zones</h2>
+            <p>Edit delivery fees without touching code. Customers will choose a zone in the cart before checkout.</p>
+          </div>
+          <div class="admin-form shipping-settings-form">
+            <label class="toggle-row">
+              <span>Enable delivery fee on customer checkout</span>
+              <input id="shippingEnabled" type="checkbox" checked />
+            </label>
+            <label class="toggle-row">
+              <span>Add Store Pickup option automatically</span>
+              <input id="shippingPickupEnabled" type="checkbox" checked />
+            </label>
+            <label>Free delivery minimum subtotal
+              <input id="freeShippingMin" type="number" min="0" placeholder="0 = disabled" />
+            </label>
+
+            <div class="section-header shipping-header">
+              <div class="section-text">
+                <strong>Delivery Zones</strong>
+                <p class="form-hint">Example: Davao City ₱60, Outside Davao ₱100, Pickup ₱0.</p>
+              </div>
+              <button class="btn ghost" type="button" id="addShippingZoneBtn">+ Add Zone</button>
+            </div>
+
+            <div id="shippingZoneRows" class="shipping-zone-rows"></div>
+
+            <div class="form-actions">
+              <button class="btn dark" id="saveShippingSettingsBtn" type="button">Save Shipping Settings</button>
+              <button class="btn ghost" id="resetShippingSettingsBtn" type="button">Load Default</button>
+            </div>
+            <p class="form-hint">In Firebase mode, settings are saved to <strong>settings/shipping</strong>. In local mode, settings are saved in this browser.</p>
+          </div>
+        </section>
+      </div>
 
       <div id="tab-agegate" class="admin-tab-panel hidden">
         <section class="panel">

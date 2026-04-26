@@ -959,3 +959,53 @@ html,body{background:radial-gradient(circle at top,#182033 0,#05070c 45%,#030407
 .age-settings-actions{display:flex;flex-wrap:wrap;gap:10px;margin-top:12px;}
 .age-settings-form textarea{min-height:150px;resize:vertical;}
 @media(max-width:520px){.age-actions{flex-direction:column}.pro-age-box{padding:20px}.terms-box{height:120px}}
+
+/* === Admin Editable Shipping Zones === */
+.shipping-settings-form .toggle-row{
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  gap:14px;
+  padding:12px 14px;
+  border:1px solid rgba(148,163,184,.18);
+  border-radius:14px;
+  background:rgba(15,23,42,.7);
+  color:#e5e7eb;
+}
+.shipping-zone-rows{
+  display:grid;
+  gap:10px;
+  margin:10px 0 14px;
+}
+.shipping-zone-row{
+  display:grid;
+  grid-template-columns: minmax(160px, 1fr) 120px auto;
+  gap:10px;
+  align-items:center;
+}
+.shipping-zone-row input,
+.shipping-select-label select{
+  width:100%;
+  border:1px solid rgba(148,163,184,.28);
+  background:#020617;
+  color:#f8fafc;
+  border-radius:12px;
+  padding:11px 12px;
+  outline:none;
+}
+.shipping-zone-row input:focus,
+.shipping-select-label select:focus{
+  border-color:#8b5cf6;
+  box-shadow:0 0 0 3px rgba(139,92,246,.15);
+}
+.shipping-select-label{
+  display:grid;
+  gap:6px;
+  margin-bottom:10px;
+  color:#cbd5e1;
+  font-size:13px;
+  font-weight:800;
+}
+@media(max-width:720px){
+  .shipping-zone-row{ grid-template-columns:1fr; }
+}
