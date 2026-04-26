@@ -1009,3 +1009,11 @@ html,body{background:radial-gradient(circle at top,#182033 0,#05070c 45%,#030407
 @media(max-width:720px){
   .shipping-zone-row{ grid-template-columns:1fr; }
 }
+
+/* Product card hover preview */
+.card .thumb-img {
+  transition: transform .25s ease, opacity .18s ease;
+}
+.card:hover .thumb-img {
+  transform: scale(1.04);
+}
