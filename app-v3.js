@@ -268,7 +268,7 @@ async function sendAdminReply(){
   if(!selectedAdminMessageId){ showNotice('Select a customer message first'); return; }
 
   const text = (textEl?.value || '').trim();
-  const image = await fileToDataUrl($("adminReplyImage")?.files?.[0]);
+  const image = await compressImageFile($("adminReplyImage")?.files?.[0]);
   if(!text && !image){ showNotice('Type a reply or add image'); return; }
 
   try{
