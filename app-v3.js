@@ -229,7 +229,51 @@ const setLocalCustomers = (items) => writeJSON(CUSTOMERS_KEY, items);
 const getLocalMessages = () => readJSON(MESSAGES_KEY, []);
 const setLocalMessages = (items) => writeJSON(MESSAGES_KEY, items);
 function seedLocalIfEmpty(){ if(!getLocalProducts().length){ setLocalProducts(demoProducts.map((item, index) => ({ ...item, id: "p" + (index + 1) }))); } }
-function renderMessages(){ /* message renderer placeholder to prevent old listener errors */ }
+let selectedAdminMessageId = null;
+function messageTime(value){
+  try{
+    if(value && typeof value.toDate === "function") return value.toDate().toLocaleString();
+    if(value) return new Date(value).toLocaleString();
+  }catch{}
+  return "";
+}
+function renderMessages(messages=[]){
+  const list = $("messagesList"), header = $("adminConversationHeader"), chat = $("adminChatWindow"), status = $("adminMessageStatus");
+  if(!list || !header || !chat) return;
+  if(!selectedAdminMessageId && messages.length) selectedAdminMessageId = messages[0].id;
+  if(!messages.length){
+    list.innerHTML = '<div class="empty mini">No customer messages yet.</div>';
+    header.textContent = 'Select a conversation';
+    chat.innerHTML = '<div class="empty mini">Messages from customers will appear here.</div>';
+    return;
+  }
+  list.innerHTML = messages.map(m => `<button type="button" class="admin-conversation-item ${m.id===selectedAdminMessageId?'active':''}" data-message-pick="${escapeHtml(m.id)}"><strong>${escapeHtml(m.name || 'Customer')}</strong><span>${escapeHtml(m.phone || '')}</span><small>${escapeHtml(m.latestMessage || m.message || 'New message')}</small><em>${escapeHtml(m.status || 'New')}</em></button>`).join('');
+  list.querySelectorAll('[data-message-pick]').forEach(btn => btn.onclick = () => { selectedAdminMessageId = btn.dataset.messagePick; renderMessages(messages); });
+  const current = messages.find(m => m.id === selectedAdminMessageId) || messages[0];
+  selectedAdminMessageId = current.id;
+  if(status) status.value = current.status || 'New';
+  header.innerHTML = `<strong>${escapeHtml(current.name || 'Customer')}</strong><span>${escapeHtml(current.phone || '')}</span>`;
+  const thread = Array.isArray(current.thread) && current.thread.length ? current.thread : [{ sender:'customer', text:current.message || current.latestMessage || '', image:current.image || '', at:current.createdAt || current.updatedAt }];
+  chat.innerHTML = thread.map(item => `<div class="admin-chat-bubble ${item.sender === 'admin' ? 'admin' : 'customer'}"><div>${renderChatMessageBody(item)}</div><small>${escapeHtml(messageTime(item.at))}</small></div>`).join('');
+  chat.scrollTop = chat.scrollHeight;
+}
+async function sendAdminReply(){
+  const textEl = $("adminReplyText"), statusEl = $("adminMessageStatus");
+  if(!selectedAdminMessageId){ showNotice('Select a customer message first'); return; }
+  const text = (textEl?.value || '').trim();
+  const image = await fileToDataUrl($("adminReplyImage")?.files?.[0]);
+  if(!text && !image){ showNotice('Type a reply or add image'); return; }
+  let current = null;
+  if(getMode()==="firebase" && firebaseReady){ const snap = await getDoc(doc(db, "messages", selectedAdminMessageId)); if(snap.exists()) current = { id:snap.id, ...snap.data() }; }
+  else current = getLocalMessages().find(x => x.id === selectedAdminMessageId);
+  if(!current){ showNotice('Conversation not found'); return; }
+  const thread = Array.isArray(current.thread) ? current.thread.slice() : [];
+  thread.push({ sender:'admin', text, image, at:new Date().toISOString() });
+  await updateMessage(selectedAdminMessageId, { thread, reply:text, latestMessage:text || 'Image attachment', status:statusEl?.value || 'Replied', updatedAt:(getMode()==="firebase" && firebaseReady) ? serverTimestamp() : new Date().toISOString() });
+  if(textEl) textEl.value = '';
+  clearFileInput("adminReplyImage", "adminReplyImagePreviewWrap", "adminReplyImagePreview", "adminReplyImageName");
+  showNotice('Reply sent');
+}
 function bindNoticeButtons(){ document.querySelectorAll(".js-notice").forEach(btn => btn.onclick = () => showNotice(btn.dataset.text || "Done")); }
 async function fetchFirebaseDocs(col, field=null){ const ref = collection(db, col); const q = field ? query(ref, orderBy(field, "desc")) : ref; const snap = await getDocs(q); return snap.docs.map(d => ({ id:d.id, ...d.data() })); }
 function storageSync(callback){ const h = () => callback(); window.addEventListener("storage", h); return () => window.removeEventListener("storage", h); }
@@ -335,6 +379,54 @@ async function moveOrderToHistory(orderId, activeOrdersCache=[]){
   }
   const orders = getLocalOrders(); const idx = orders.findIndex(o => o.id === orderId); if(idx < 0) return;
   const history = getLocalHistory(); history.unshift({ ...orders[idx], status:orders[idx].status || "Removed", movedAt:new Date().toISOString() }); setLocalHistory(history); orders.splice(idx,1); setLocalOrders(orders);
+}
+async function cancelAndRestoreOrder(orderId, activeOrdersCache=[]){
+  const order = activeOrdersCache.find(x => x.id === orderId);
+  if(!order) return;
+  if(!confirm("Cancel this order and restore stock?")) return;
+  if(getMode()==="firebase" && firebaseReady){
+    await runTransaction(db, async (transaction) => {
+      const reads = [];
+      for(const item of (order.items || [])){
+        const productId = item.productId || item.id;
+        if(!productId) continue;
+        const ref = doc(db, "products", productId);
+        const snap = await transaction.get(ref);
+        reads.push({ item, ref, snap });
+      }
+      const orderRef = doc(db, "orders", orderId);
+      const histRef = doc(db, "order_history", orderId);
+      for(const row of reads){
+        if(!row.snap.exists()) continue;
+        const data = row.snap.data();
+        const qty = Number(row.item.qty || 0);
+        const variant = row.item.size || row.item.variant || "Default";
+        const variantStocks = (data.variantStocks && typeof data.variantStocks === "object") ? { ...data.variantStocks } : {};
+        if(variant && (Object.keys(variantStocks).length || Array.isArray(data.variants))){
+          variantStocks[variant] = Number(variantStocks[variant] || 0) + qty;
+          transaction.update(row.ref, { variantStocks, stock: sumVariantStocks(variantStocks) });
+        } else transaction.update(row.ref, { stock: Number(data.stock || 0) + qty });
+      }
+      transaction.set(histRef, { ...order, status:"Cancelled", cancelReason:"Cancelled by admin", stockRestored:true, movedAt:serverTimestamp() });
+      transaction.delete(orderRef);
+    });
+    return;
+  }
+  const products = getLocalProducts();
+  (order.items || []).forEach(item => {
+    const productId = item.productId || item.id;
+    const p = products.find(x => x.id === productId);
+    if(!p) return;
+    const qty = Number(item.qty || 0);
+    const variant = item.size || item.variant || "Default";
+    const map = variantStockMap(p);
+    if(variant && (Object.keys(map).length || Array.isArray(p.variants))){ p.variantStocks = { ...map, [variant]: Number(map[variant] || 0) + qty }; p.stock = sumVariantStocks(p.variantStocks); }
+    else p.stock = Number(p.stock || 0) + qty;
+  });
+  setLocalProducts(products);
+  const orders = getLocalOrders();
+  const idx = orders.findIndex(o => o.id === orderId);
+  if(idx >= 0){ const history = getLocalHistory(); history.unshift({ ...orders[idx], status:"Cancelled", stockRestored:true, movedAt:new Date().toISOString() }); orders.splice(idx,1); setLocalOrders(orders); setLocalHistory(history); }
 }
 function subscribeProducts(callback){
   if(getMode()==="firebase" && firebaseReady){
@@ -1414,10 +1506,11 @@ function initAdmin(){
     if(!tbody || !historyBody) return;
     if(!activeOrders.length) tbody.innerHTML = '<tr><td colspan="6" class="empty">No active orders yet.</td></tr>';
     else {
-      tbody.innerHTML = activeOrders.map(order => `<tr><td><div style="font-weight:800">${escapeHtml(order.receiptNo || order.id || "-")}</div><div class="small">${escapeHtml(order.id||"")}</div></td><td><div style="font-weight:800">${escapeHtml(order.customer?.name||"-")}</div><div class="small">${escapeHtml(order.customer?.phone||"")}</div></td><td>${money(order.total||0)}</td><td><select class="order-status-select" data-order-status="${escapeHtml(order.id||"")}"><option value="Pending" ${order.status==="Pending"?"selected":""}>Pending</option><option value="Preparing" ${order.status==="Preparing"?"selected":""}>Preparing</option><option value="Ready" ${order.status==="Ready"?"selected":""}>Ready</option><option value="Paid" ${order.status==="Paid"?"selected":""}>Paid</option><option value="Completed" ${order.status==="Completed"?"selected":""}>Completed</option></select></td><td>${(order.items||[]).map(i => `${escapeHtml(i.name)} x${Number(i.qty)}<br><span class="small">${escapeHtml(i.size || "")}</span>`).join("<br>")}</td><td><div class="row-actions"><button class="btn dark" data-pay-print="${escapeHtml(order.id||"")}">Paid + Print</button><button class="btn ghost" data-print-order="${escapeHtml(order.id||"")}">Reprint</button><button class="btn ghost" data-archive-order="${escapeHtml(order.id||"")}">Move to History</button></div></td></tr>`).join("");
+      tbody.innerHTML = activeOrders.map(order => `<tr><td><div style="font-weight:800">${escapeHtml(order.receiptNo || order.id || "-")}</div><div class="small">${escapeHtml(order.id||"")}</div></td><td><div style="font-weight:800">${escapeHtml(order.customer?.name||"-")}</div><div class="small">${escapeHtml(order.customer?.phone||"")}</div></td><td>${money(order.total||0)}</td><td><select class="order-status-select" data-order-status="${escapeHtml(order.id||"")}"><option value="Pending" ${order.status==="Pending"?"selected":""}>Pending</option><option value="Preparing" ${order.status==="Preparing"?"selected":""}>Preparing</option><option value="Ready" ${order.status==="Ready"?"selected":""}>Ready</option><option value="Paid" ${order.status==="Paid"?"selected":""}>Paid</option><option value="Completed" ${order.status==="Completed"?"selected":""}>Completed</option></select></td><td>${(order.items||[]).map(i => `${escapeHtml(i.name)} x${Number(i.qty)}<br><span class="small">${escapeHtml(i.size || "")}</span>`).join("<br>")}</td><td><div class="row-actions"><button class="btn dark" data-pay-print="${escapeHtml(order.id||"")}">Paid + Print</button><button class="btn ghost" data-print-order="${escapeHtml(order.id||"")}">Reprint</button><button class="btn danger" data-cancel-restore="${escapeHtml(order.id||"")}">Cancel + Restore Stock</button><button class="btn ghost" data-archive-order="${escapeHtml(order.id||"")}">Move to History</button></div></td></tr>`).join("");
       tbody.querySelectorAll("[data-order-status]").forEach(select => select.onchange = async function(){ try { await updateOrderStatus(this.dataset.orderStatus, this.value, activeOrdersCache); showNotice(this.value==="Completed" ? "Order moved to history" : "Order status updated"); } catch { showNotice("Status update failed"); } });
       tbody.querySelectorAll("[data-pay-print]").forEach(btn => btn.onclick = async () => payAndPrintOrder(btn.dataset.payPrint));
       tbody.querySelectorAll("[data-print-order]").forEach(btn => btn.onclick = () => printReceipt(allOrdersForPrint.find(x => x.id === btn.dataset.printOrder)));
+      tbody.querySelectorAll("[data-cancel-restore]").forEach(btn => btn.onclick = async () => { try { await cancelAndRestoreOrder(btn.dataset.cancelRestore, activeOrdersCache); showNotice("Order cancelled and stock restored"); } catch(error) { showNotice(error.message || "Cancel failed"); } });
       tbody.querySelectorAll("[data-archive-order]").forEach(btn => btn.onclick = async () => { try { await moveOrderToHistory(btn.dataset.archiveOrder, activeOrdersCache); showNotice("Order moved to history"); } catch { showNotice("Move failed"); } });
     }
     if(!historyOrders.length) historyBody.innerHTML = '<tr><td colspan="6" class="empty">No order history yet.</td></tr>';
@@ -1541,6 +1634,7 @@ function initAdmin(){
 
   if($("adminReplyImage")) $("adminReplyImage").onchange = () => setImagePreview("adminReplyImage", "adminReplyImagePreviewWrap", "adminReplyImagePreview", "adminReplyImageName");
   if($("removeAdminReplyImageBtn")) $("removeAdminReplyImageBtn").onclick = () => clearFileInput("adminReplyImage", "adminReplyImagePreviewWrap", "adminReplyImagePreview", "adminReplyImageName");
+  if($("sendAdminReplyBtn")) $("sendAdminReplyBtn").onclick = sendAdminReply;
 
   subscribeProducts((items, source) => { adminProductsCache = items; renderProductsAdmin(items, source); renderPosSearch($("posScanInput")?.value || ""); });
   subscribeOrders((activeOrders, historyOrders) => renderOrders(activeOrders, historyOrders));
