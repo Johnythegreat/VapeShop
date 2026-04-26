@@ -737,7 +737,7 @@ function initShop(){
 
   function renderCart(){
     const subtotal = cart.reduce((sum, item) => sum + Number(item.price) * Number(item.qty), 0);
-    const shipping = cart.length ? 20/km : 0;
+    const shipping = cart.length ? 20: 0;
     const total = subtotal + shipping;
 
     if(!cart.length){
