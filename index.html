@@ -114,6 +114,7 @@
       <button class="nav-btn" id="navCategory">🧃<span>Category</span></button>
       <button class="nav-btn js-notice" data-text="Trends page can be added next">🔥<span>Promos</span></button>
       <button class="nav-btn" id="navCart">🛍️<span>Cart</span></button>
+      <button class="nav-btn" id="navTrack">📦<span>Track</span></button>
       <button class="nav-btn" id="navAccount">👤<span>Me</span></button>
     </nav>
   </div>
@@ -271,6 +272,26 @@
     </div>
   </div>
 
+
+
+  <div class="tracking-modal hidden" id="trackingModal">
+    <div class="tracking-panel">
+      <div class="tracking-head">
+        <div>
+          <strong>📦 Track Your Order</strong>
+          <p>Enter your Order ID or phone number to see the latest status.</p>
+        </div>
+        <button class="icon-btn" id="closeTrackingBtn" type="button">✕</button>
+      </div>
+      <div class="tracking-search">
+        <input id="trackingInput" type="text" placeholder="Order ID or 09xxxxxxxxx" />
+        <button class="btn dark" id="trackingSearchBtn" type="button">Track</button>
+      </div>
+      <div class="tracking-result" id="trackingResult">
+        <div class="tracking-empty">Use the phone number from your profile or the receipt/order ID.</div>
+      </div>
+    </div>
+  </div>
 
   <div class="notice" id="notice"></div>
 

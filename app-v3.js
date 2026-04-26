@@ -229,6 +229,7 @@ const setLocalCustomers = (items) => writeJSON(CUSTOMERS_KEY, items);
 const getLocalMessages = () => readJSON(MESSAGES_KEY, []);
 const setLocalMessages = (items) => writeJSON(MESSAGES_KEY, items);
 function seedLocalIfEmpty(){ if(!getLocalProducts().length){ setLocalProducts(demoProducts.map((item, index) => ({ ...item, id: "p" + (index + 1) }))); } }
+function renderMessages(){ /* message renderer placeholder to prevent old listener errors */ }
 function bindNoticeButtons(){ document.querySelectorAll(".js-notice").forEach(btn => btn.onclick = () => showNotice(btn.dataset.text || "Done")); }
 async function fetchFirebaseDocs(col, field=null){ const ref = collection(db, col); const q = field ? query(ref, orderBy(field, "desc")) : ref; const snap = await getDocs(q); return snap.docs.map(d => ({ id:d.id, ...d.data() })); }
 function storageSync(callback){ const h = () => callback(); window.addEventListener("storage", h); return () => window.removeEventListener("storage", h); }
@@ -264,64 +265,26 @@ async function saveCustomerProfile(account){
 async function createOrder(cart, account, shippingInfo={}){
   if(getMode()==="firebase" && firebaseReady){
     await runTransaction(db, async (transaction) => {
-      // Firestore transactions must finish ALL reads before ANY writes.
-      // This also supports carts with multiple variants from the same product.
-      const refsById = new Map();
-      for(const item of cart){
-        if(item && item.id && !refsById.has(item.id)){
-          refsById.set(item.id, doc(db, "products", item.id));
-        }
-      }
-
-      const snapsById = new Map();
-      for(const [id, ref] of refsById.entries()){
-        const snap = await transaction.get(ref);
-        if(!snap.exists()) throw new Error("Product not found");
-        snapsById.set(id, snap);
-      }
-
       const liveItems = [];
-      const updatesById = new Map();
-
       for(const item of cart){
-        const snap = snapsById.get(item.id);
-        const originalData = snap.data();
-        const draft = updatesById.get(item.id) || {
-          ref: refsById.get(item.id),
-          data: {
-            ...originalData,
-            variantStocks: (originalData.variantStocks && typeof originalData.variantStocks === "object") ? { ...originalData.variantStocks } : undefined,
-            stock: Number(originalData.stock || 0)
-          }
-        };
-
-        const data = draft.data;
+        const ref = doc(db, "products", item.id); const snap = await transaction.get(ref);
+        if(!snap.exists()) throw new Error(item.name + " not found");
+        const data = snap.data();
         const qty = Number(item.qty || 0);
         const selectedVariant = item.size || item.variant || "Default";
-        const variantStocks = (data.variantStocks && typeof data.variantStocks === "object") ? data.variantStocks : {};
-
+        const variantStocks = (data.variantStocks && typeof data.variantStocks === "object") ? { ...data.variantStocks } : {};
         if(Object.keys(variantStocks).length && Object.prototype.hasOwnProperty.call(variantStocks, selectedVariant)){
           const vStock = Number(variantStocks[selectedVariant] || 0);
-          if(vStock < qty) throw new Error("Not enough stock for " + (originalData.name || item.name) + " - " + selectedVariant);
+          if(vStock < qty) throw new Error("Not enough stock for " + item.name + " - " + selectedVariant);
           variantStocks[selectedVariant] = vStock - qty;
-          data.variantStocks = variantStocks;
-          data.stock = sumVariantStocks(variantStocks);
+          transaction.update(ref, { variantStocks, stock: sumVariantStocks(variantStocks) });
         } else {
           const stock = Number(data.stock || 0);
-          if(stock < qty) throw new Error("Not enough stock for " + (originalData.name || item.name));
-          data.stock = stock - qty;
+          if(stock < qty) throw new Error("Not enough stock for " + item.name);
+          transaction.update(ref, { stock: stock - qty });
         }
-
-        updatesById.set(item.id, draft);
-        liveItems.push({ name:originalData.name || item.name, qty, price:Number(originalData.price || item.price || 0), productId:item.id, size:selectedVariant, image:item.image || "" });
+        liveItems.push({ name:data.name, qty, price:Number(data.price), productId:item.id, size:selectedVariant, image:item.image || "" });
       }
-
-      for(const update of updatesById.values()){
-        const payload = { stock: Number(update.data.stock || 0) };
-        if(update.data.variantStocks && typeof update.data.variantStocks === "object") payload.variantStocks = update.data.variantStocks;
-        transaction.update(update.ref, payload);
-      }
-
       const orderRef = doc(collection(db, "orders"));
       transaction.set(orderRef, { customer:account, items:liveItems, subtotal:cartSubtotal(liveItems), shippingFee:Number(shippingInfo.fee || 0), shippingZone:shippingInfo.zone || "", total:totalAmount(liveItems, shippingInfo.fee), status:"Pending", createdAt:serverTimestamp() });
     });
@@ -341,7 +304,7 @@ async function createOrder(cart, account, shippingInfo={}){
   }
   setLocalProducts(products);
   const orders = getLocalOrders();
-  orders.unshift({ id:"ORD-" + Date.now(), customer:account, items:cart.map(i => ({ name:i.name, qty:Number(i.qty), price:Number(i.price), productId:i.id, size:i.size || i.variant || "Default", image:i.image || "" })), subtotal:cartSubtotal(cart), shippingFee:Number(shippingInfo.fee || 0), shippingZone:shippingInfo.zone || "", total:totalAmount(cart, shippingInfo.fee), status:"Pending", createdAt:new Date().toISOString() });
+  orders.unshift({ id:"ORD-" + Date.now(), customer:account, items:cart.map(i => ({ name:i.name, qty:Number(i.qty), price:Number(i.price), size:i.size || "M" })), subtotal:cartSubtotal(cart), shippingFee:Number(shippingInfo.fee || 0), shippingZone:shippingInfo.zone || "", total:totalAmount(cart, shippingInfo.fee), status:"Pending", createdAt:new Date().toISOString() });
   setLocalOrders(orders);
 }
 async function updateOrderStatus(orderId, newStatus, activeOrdersCache=[]){
@@ -362,89 +325,6 @@ async function moveOrderToHistory(orderId, activeOrdersCache=[]){
   const orders = getLocalOrders(); const idx = orders.findIndex(o => o.id === orderId); if(idx < 0) return;
   const history = getLocalHistory(); history.unshift({ ...orders[idx], status:orders[idx].status || "Removed", movedAt:new Date().toISOString() }); setLocalHistory(history); orders.splice(idx,1); setLocalOrders(orders);
 }
-async function cancelOrderAndRestoreStock(orderId, activeOrdersCache=[]){
-  if(!confirm("Cancel this order and return all items to inventory?")) return;
-  if(getMode()==="firebase" && firebaseReady){
-    const order = activeOrdersCache.find(x => x.id === orderId);
-    if(!order) throw new Error("Order not found");
-    if(["Paid", "Completed"].includes(order.status || "")){
-      if(!confirm("This order is already paid/completed. Continue and restore stock?")) return;
-    }
-    await runTransaction(db, async (transaction) => {
-      const items = Array.isArray(order.items) ? order.items : [];
-      const refsById = new Map();
-      for(const item of items){
-        const productId = item.productId || item.id;
-        if(productId && !refsById.has(productId)) refsById.set(productId, doc(db, "products", productId));
-      }
-      const snapsById = new Map();
-      for(const [id, ref] of refsById.entries()){
-        const snap = await transaction.get(ref);
-        if(snap.exists()) snapsById.set(id, snap);
-      }
-      const updatesById = new Map();
-      for(const item of items){
-        const productId = item.productId || item.id;
-        const snap = snapsById.get(productId);
-        if(!snap) continue;
-        const originalData = snap.data();
-        const draft = updatesById.get(productId) || {
-          ref: refsById.get(productId),
-          data: {
-            ...originalData,
-            variantStocks: (originalData.variantStocks && typeof originalData.variantStocks === "object") ? { ...originalData.variantStocks } : undefined,
-            stock: Number(originalData.stock || 0)
-          }
-        };
-        const qty = Number(item.qty || 1);
-        const selectedVariant = item.size || item.variant || "Default";
-        const variantStocks = (draft.data.variantStocks && typeof draft.data.variantStocks === "object") ? draft.data.variantStocks : {};
-        if(Object.keys(variantStocks).length && Object.prototype.hasOwnProperty.call(variantStocks, selectedVariant)){
-          variantStocks[selectedVariant] = Number(variantStocks[selectedVariant] || 0) + qty;
-          draft.data.variantStocks = variantStocks;
-          draft.data.stock = sumVariantStocks(variantStocks);
-        } else {
-          draft.data.stock = Number(draft.data.stock || 0) + qty;
-        }
-        updatesById.set(productId, draft);
-      }
-      for(const update of updatesById.values()){
-        const payload = { stock: Number(update.data.stock || 0) };
-        if(update.data.variantStocks && typeof update.data.variantStocks === "object") payload.variantStocks = update.data.variantStocks;
-        transaction.update(update.ref, payload);
-      }
-      transaction.set(doc(db, "order_history", orderId), { ...order, status:"Cancelled", cancelReason:"Customer changed mind / order cancelled", stockRestored:true, cancelledAt:serverTimestamp(), movedAt:serverTimestamp() });
-      transaction.delete(doc(db, "orders", orderId));
-    });
-    return;
-  }
-  const orders = getLocalOrders();
-  const idx = orders.findIndex(o => o.id === orderId);
-  if(idx < 0) throw new Error("Order not found");
-  const order = orders[idx];
-  const products = getLocalProducts();
-  for(const item of (order.items || [])){
-    const productId = item.productId || item.id;
-    const product = products.find(p => p.id === productId) || products.find(p => (p.name || "") === (item.name || ""));
-    if(!product) continue;
-    const qty = Number(item.qty || 1);
-    const selectedVariant = item.size || item.variant || "Default";
-    const map = variantStockMap(product);
-    if(selectedVariant && Object.prototype.hasOwnProperty.call(map, selectedVariant)){
-      product.variantStocks = { ...map, [selectedVariant]: Number(map[selectedVariant] || 0) + qty };
-      product.stock = sumVariantStocks(product.variantStocks);
-    } else {
-      product.stock = Number(product.stock || 0) + qty;
-    }
-  }
-  setLocalProducts(products);
-  const history = getLocalHistory();
-  history.unshift({ ...order, status:"Cancelled", cancelReason:"Customer changed mind / order cancelled", stockRestored:true, cancelledAt:new Date().toISOString(), movedAt:new Date().toISOString() });
-  orders.splice(idx, 1);
-  setLocalOrders(orders);
-  setLocalHistory(history);
-}
-
 function subscribeProducts(callback){
   if(getMode()==="firebase" && firebaseReady){
     return onSnapshot(query(collection(db, "products"), orderBy("createdAt", "desc")), (snapshot) => callback(snapshot.docs.map(d => ({ id:d.id, ...d.data() })), "firebase"), () => { seedLocalIfEmpty(); callback(getLocalProducts(), "local"); });
@@ -619,16 +499,8 @@ function initShop(){
   }
 
   function firstProductImage(p){
-    // Main customer image priority:
-    // 1) productImages = extra product images uploaded in Admin
-    // 2) images = saved product gallery
-    // 3) image = legacy single image
-    // 4) variantImages = flavor/color fallback only
-    const productImgs = Array.isArray(p?.productImages) ? p.productImages.map(x => String(x || "").trim()).filter(Boolean) : [];
-    const galleryImgs = Array.isArray(p?.images) ? p.images.map(x => String(x || "").trim()).filter(Boolean) : [];
-    const legacyImg = String(p?.image || "").trim();
-    const variantFallback = (p?.variantImages && typeof p.variantImages === "object") ? Object.values(p.variantImages).map(x => String(x || "").trim()).filter(Boolean)[0] : "";
-    return productImgs[0] || galleryImgs[0] || legacyImg || variantFallback || "";
+    const imgs = Array.isArray(p?.images) ? p.images.map(x => String(x || "").trim()).filter(Boolean) : [];
+    return imgs[0] || String(p?.image || "").trim();
   }
 
   function renderProducts(){
@@ -646,14 +518,11 @@ function initShop(){
 
     gridEl.innerHTML = filtered.map(p => {
       const cardImage = firstProductImage(p);
-      const previewImages = Array.from(new Set(((Array.isArray(p.productImages) && p.productImages.length ? p.productImages : (Array.isArray(p.images) ? p.images : [])) || []).map(x => String(x || "").trim()).filter(Boolean)));
-      const hoverImage = previewImages[1] || previewImages[0] || cardImage;
       const safeImage = escapeHtml(cardImage);
-      const safeHoverImage = escapeHtml(hoverImage);
       return `
       <article class="card" data-view="${p.id}">
         <div class="thumb ${cardImage ? "has-image" : "no-image"}">
-          ${cardImage ? `<img class="thumb-img" src="${safeImage}" data-main-src="${safeImage}" data-hover-src="${safeHoverImage}" alt="${escapeHtml((p.brand || "") + " " + (p.name || "Product"))}" loading="lazy" onerror="this.closest('.thumb').classList.add('no-image');this.remove();">` : `<div class="thumb-placeholder">MR VAPE SHOP</div>`}
+          ${cardImage ? `<img class="thumb-img" src="${safeImage}" alt="${escapeHtml((p.brand || "") + " " + (p.name || "Product"))}" loading="lazy" onerror="this.closest('.thumb').classList.add('no-image');this.remove();">` : `<div class="thumb-placeholder">MR VAPE SHOP</div>`}
           <div class="badge">${escapeHtml(p.badge || "New")}</div>
           <button class="fav js-notice" data-text="Wishlist feature can be added next">♡</button>
         </div>
@@ -676,13 +545,6 @@ function initShop(){
       </article>
     `;
     }).join("");
-
-    gridEl.querySelectorAll(".thumb-img[data-hover-src]").forEach(img => {
-      const mainSrc = img.dataset.mainSrc || img.src;
-      const hoverSrc = img.dataset.hoverSrc || mainSrc;
-      img.addEventListener("mouseenter", () => { if(hoverSrc && hoverSrc !== img.src) img.src = hoverSrc; });
-      img.addEventListener("mouseleave", () => { if(mainSrc) img.src = mainSrc; });
-    });
 
     bindNoticeButtons();
 
@@ -770,9 +632,8 @@ function initShop(){
       });
     }
     const variantGalleryImages = Object.values(variantImageMap).map(x => String(x || "").trim()).filter(Boolean);
-    const productImages = (Array.isArray(p.productImages) && p.productImages.length ? p.productImages : (Array.isArray(p.images) && p.images.length ? p.images : [firstProductImage(p)])).map(x => String(x || "").trim()).filter(Boolean);
-    // Product uploaded images show first. Variant/flavor photos still appear after them.
-    const galleryImages = Array.from(new Set(productImages.concat(variantGalleryImages))).filter(Boolean);
+    const productImages = (Array.isArray(p.images) && p.images.length ? p.images : [firstProductImage(p)]).map(x => String(x || "").trim()).filter(Boolean);
+    const galleryImages = Array.from(new Set(variantGalleryImages.concat(productImages))).filter(Boolean);
     $("productPageMainImage").src = galleryImages[0] || firstProductImage(p);
     $("productPageBadge").textContent = p.badge || "New";
     const productThumbs = $("productThumbs");
@@ -984,10 +845,147 @@ function initShop(){
         </div>
         <div class="account-actions">
           <button class="btn dark full-btn" id="saveAccountBtn">Save Profile</button>
+          <button class="btn ghost full-btn track-account-btn" id="openTrackFromAccountBtn" type="button">📦 Track My Orders</button>
         </div>
       </div>
     `;
     $("saveAccountBtn").onclick = saveAccount;
+    if($("openTrackFromAccountBtn")) $("openTrackFromAccountBtn").onclick = () => openTrackingModal(account.phone || "");
+  }
+
+  function openTrackingModal(prefill=""){
+    const modal = $("trackingModal");
+    const input = $("trackingInput");
+    const result = $("trackingResult");
+    if(!modal) return;
+    modal.classList.remove("hidden");
+    if(input){ input.value = prefill || account.phone || ""; setTimeout(() => input.focus(), 50); }
+    if(result && !result.dataset.loaded){
+      result.innerHTML = '<div class="tracking-empty">Enter your Order ID or phone number, then tap Track.</div>';
+    }
+  }
+
+  function closeTrackingModal(){
+    const modal = $("trackingModal");
+    if(modal) modal.classList.add("hidden");
+  }
+
+  function normalizeStatus(status){
+    const s = String(status || "Pending").toLowerCase();
+    if(s.includes("complete") || s.includes("delivered") || s.includes("paid")) return "Completed";
+    if(s.includes("cancel")) return "Cancelled";
+    if(s.includes("pack") || s.includes("prepar") || s.includes("process")) return "Preparing";
+    return "Pending";
+  }
+
+  function statusClass(status){
+    const s = normalizeStatus(status).toLowerCase();
+    return "tracking-status-" + s;
+  }
+
+  function orderDateText(order){
+    const raw = order.createdAt;
+    if(raw && typeof raw.toDate === "function") return raw.toDate().toLocaleString();
+    if(raw && raw.seconds) return new Date(raw.seconds * 1000).toLocaleString();
+    if(raw) return new Date(raw).toLocaleString();
+    return "—";
+  }
+
+  function trackingTimeline(status){
+    const current = normalizeStatus(status);
+    const steps = [
+      {key:"Pending", title:"Order Placed", desc:"We received your order and it is waiting for confirmation."},
+      {key:"Preparing", title:"Preparing", desc:"Your items are being checked, packed, or prepared."},
+      {key:"Completed", title:"Completed", desc:"Your order is completed / released."}
+    ];
+    if(current === "Cancelled"){
+      return `<div class="tracking-timeline">
+        <div class="tracking-step active"><div class="tracking-dot">✓</div><div><div class="tracking-step-title">Order Placed</div><div class="tracking-step-desc">We received your order.</div></div></div>
+        <div class="tracking-step active"><div class="tracking-dot">!</div><div><div class="tracking-step-title">Cancelled</div><div class="tracking-step-desc">This order was cancelled. Please message the shop for help.</div></div></div>
+      </div>`;
+    }
+    const level = {Pending:0, Preparing:1, Completed:2}[current] ?? 0;
+    return `<div class="tracking-timeline">${steps.map((step,i)=>`
+      <div class="tracking-step ${i<=level ? "active" : ""}">
+        <div class="tracking-dot">${i<=level ? "✓" : i+1}</div>
+        <div><div class="tracking-step-title">${step.title}</div><div class="tracking-step-desc">${step.desc}</div></div>
+      </div>`).join("")}</div>`;
+  }
+
+  function trackingCard(order){
+    const status = normalizeStatus(order.status || order.finalStatus);
+    const items = Array.isArray(order.items) ? order.items : [];
+    return `<div class="tracking-card">
+      <div class="tracking-card-head">
+        <div>
+          <div style="font-weight:900">${escapeHtml(order.customer?.name || "Customer")}</div>
+          <div class="tracking-order-id">Order ID: ${escapeHtml(order.id || order.receiptNo || "")}</div>
+        </div>
+        <div class="tracking-status-pill ${statusClass(status)}">${status}</div>
+      </div>
+      ${trackingTimeline(status)}
+      <div class="tracking-meta">
+        <div class="tracking-meta-row"><span>Date</span><strong>${escapeHtml(orderDateText(order))}</strong></div>
+        <div class="tracking-meta-row"><span>Delivery</span><strong>${escapeHtml(order.shippingZone || "Store Pickup")}</strong></div>
+        <div class="tracking-meta-row"><span>Total</span><strong>${money(Number(order.total || 0))}</strong></div>
+      </div>
+      <div class="tracking-items">
+        ${items.map(i=>`<div class="tracking-item"><span>${escapeHtml(i.name || "Item")} ${i.size ? "• " + escapeHtml(i.size) : ""}</span><strong>x${Number(i.qty || 1)}</strong></div>`).join("") || '<div class="small">No item details found.</div>'}
+      </div>
+    </div>`;
+  }
+
+  async function findOrdersForTracking(term){
+    const clean = String(term || "").trim();
+    if(!clean) return [];
+    if(getMode()==="firebase" && firebaseReady){
+      const results = [];
+      // Direct ID lookup first.
+      for(const colName of ["orders","order_history"]){
+        try{
+          const snap = await getDoc(doc(db, colName, clean));
+          if(snap.exists()) results.push({ id:snap.id, source:colName, ...snap.data() });
+        }catch(e){}
+      }
+      // Simple full read fallback so it works with the current rules and nested customer.phone.
+      for(const colName of ["orders","order_history"]){
+        try{
+          const snap = await getDocs(collection(db, colName));
+          snap.forEach(d => {
+            const data = d.data();
+            const phone = String(data.customer?.phone || "");
+            const receipt = String(data.receiptNo || "");
+            const id = String(d.id || "");
+            if(phone === clean || id === clean || receipt === clean || phone.endsWith(clean)){
+              if(!results.some(x => x.id === d.id)) results.push({ id:d.id, source:colName, ...data });
+            }
+          });
+        }catch(e){}
+      }
+      return results;
+    }
+    const all = [...getLocalOrders().map(o=>({...o, source:"orders"})), ...getLocalHistory().map(o=>({...o, source:"order_history"}))];
+    return all.filter(o => String(o.id||"") === clean || String(o.receiptNo||"") === clean || String(o.customer?.phone || "") === clean || String(o.customer?.phone || "").endsWith(clean));
+  }
+
+  async function trackOrder(){
+    const input = $("trackingInput");
+    const result = $("trackingResult");
+    if(!input || !result) return;
+    const term = input.value.trim();
+    if(!term){ showNotice("Enter Order ID or phone"); return; }
+    result.dataset.loaded = "1";
+    result.innerHTML = '<div class="tracking-empty">Checking order status...</div>';
+    try{
+      const orders = await findOrdersForTracking(term);
+      if(!orders.length){
+        result.innerHTML = '<div class="tracking-empty">No order found. Check your Order ID or phone number.</div>';
+        return;
+      }
+      result.innerHTML = orders.sort((a,b)=>String(b.createdAt?.seconds||b.createdAt||"").localeCompare(String(a.createdAt?.seconds||a.createdAt||""))).map(trackingCard).join('<div style="height:10px"></div>');
+    }catch(error){
+      result.innerHTML = '<div class="tracking-empty">Unable to track order right now. Please try again.</div>';
+    }
   }
 
   async function saveAccount(){
@@ -1193,6 +1191,11 @@ function initShop(){
   $("openCartBtn").onclick = () => openDrawer("cart");
   $("navCart").onclick = () => openDrawer("cart");
   $("navAccount").onclick = () => openDrawer("account");
+  if($("navTrack")) $("navTrack").onclick = () => openTrackingModal(account.phone || "");
+  if($("closeTrackingBtn")) $("closeTrackingBtn").onclick = closeTrackingModal;
+  if($("trackingSearchBtn")) $("trackingSearchBtn").onclick = trackOrder;
+  if($("trackingInput")) $("trackingInput").addEventListener("keydown", (e) => { if(e.key === "Enter") trackOrder(); });
+  if($("trackingModal")) $("trackingModal").onclick = (e) => { if(e.target.id === "trackingModal") closeTrackingModal(); };
   $("navCategory").onclick = () => $("productsSection").scrollIntoView({behavior:"smooth"});
   $("navHome").onclick = () => window.scrollTo({top:0, behavior:"smooth"});
   $("closeDrawerBtn").onclick = closeDrawer;
@@ -1254,60 +1257,25 @@ async function createPosSale(cart, account={}, payment={}){
   if(getMode()==="firebase" && firebaseReady){
     let orderId = receiptNo;
     await runTransaction(db, async (transaction) => {
-      // Firestore transactions must finish ALL reads before ANY writes.
-      const refsById = new Map();
       for(const item of cart){
-        if(item && item.id && !refsById.has(item.id)){
-          refsById.set(item.id, doc(db, "products", item.id));
-        }
-      }
-
-      const snapsById = new Map();
-      for(const [id, ref] of refsById.entries()){
+        const ref = doc(db, "products", item.id);
         const snap = await transaction.get(ref);
-        if(!snap.exists()) throw new Error("Product not found");
-        snapsById.set(id, snap);
-      }
-
-      const updatesById = new Map();
-      for(const item of cart){
-        const snap = snapsById.get(item.id);
-        const originalData = snap.data();
-        const draft = updatesById.get(item.id) || {
-          ref: refsById.get(item.id),
-          data: {
-            ...originalData,
-            variantStocks: (originalData.variantStocks && typeof originalData.variantStocks === "object") ? { ...originalData.variantStocks } : undefined,
-            stock: Number(originalData.stock || 0)
-          }
-        };
-
-        const data = draft.data;
+        if(!snap.exists()) throw new Error(item.name + " not found");
+        const data = snap.data();
         const qty = Number(item.qty || 1);
         const selectedVariant = item.size || item.variant || "Default";
-        const variantStocks = (data.variantStocks && typeof data.variantStocks === "object") ? data.variantStocks : {};
-
+        const variantStocks = (data.variantStocks && typeof data.variantStocks === "object") ? { ...data.variantStocks } : {};
         if(Object.keys(variantStocks).length && Object.prototype.hasOwnProperty.call(variantStocks, selectedVariant)){
           const current = Number(variantStocks[selectedVariant] || 0);
-          if(current < qty) throw new Error("Not enough stock for " + (originalData.name || item.name) + " - " + selectedVariant);
+          if(current < qty) throw new Error("Not enough stock for " + item.name + " - " + selectedVariant);
           variantStocks[selectedVariant] = current - qty;
-          data.variantStocks = variantStocks;
-          data.stock = sumVariantStocks(variantStocks);
+          transaction.update(ref, { variantStocks, stock: sumVariantStocks(variantStocks) });
         } else {
           const stock = Number(data.stock || 0);
-          if(stock < qty) throw new Error("Not enough stock for " + (originalData.name || item.name));
-          data.stock = stock - qty;
+          if(stock < qty) throw new Error("Not enough stock for " + item.name);
+          transaction.update(ref, { stock: stock - qty });
         }
-
-        updatesById.set(item.id, draft);
       }
-
-      for(const update of updatesById.values()){
-        const payload = { stock: Number(update.data.stock || 0) };
-        if(update.data.variantStocks && typeof update.data.variantStocks === "object") payload.variantStocks = update.data.variantStocks;
-        transaction.update(update.ref, payload);
-      }
-
       const orderRef = doc(collection(db, "order_history"));
       orderId = orderRef.id;
       transaction.set(orderRef, { ...orderPayload, createdAt:serverTimestamp(), paidAt:serverTimestamp(), movedAt:serverTimestamp() });
@@ -1349,7 +1317,7 @@ function initAdmin(){
   }
   function updateStats(items){ $("statProducts").textContent = items.length; $("statStock").textContent = items.reduce((a,b)=>a+Number(b.stock||0),0); $("statLow").textContent = items.filter(x=>Number(x.stock||0)<=10).length; $("statCategories").textContent = new Set(items.map(x=>x.category)).size; }
   function clearForm(){ form.reset(); $("docId").value = ""; if($("variants")) $("variants").value = ""; if($("variantImages")) $("variantImages").value = "{}"; if($("image")) $("image").value = ""; window.__pendingProductImages = [""]; setTimeout(() => { window.hydrateVariantRows && window.hydrateVariantRows(null); window.hydrateProductImageRows && window.hydrateProductImageRows([""]); }, 0); }
-  function fillForm(item){ $("docId").value=item.id; $("name").value=item.name||""; $("brand").value=item.brand||""; $("category").value=item.category||"Pods"; $("price").value=item.price||0; $("oldPrice").value=item.oldPrice||0; $("stock").value=item.stock||0; $("sold").value=item.sold||""; $("badge").value=item.badge||""; if($("variants")) $("variants").value = Array.isArray(item.variants) ? item.variants.join("\n") : ""; if($("variantImages")) $("variantImages").value = JSON.stringify(item.variantImages || {}); const variantImgs = item.variantImages && typeof item.variantImages === "object" ? Object.values(item.variantImages).filter(Boolean) : []; const productImgs = Array.isArray(item.productImages) && item.productImages.length ? item.productImages.filter(Boolean) : []; const allImgs = (productImgs.length ? productImgs : (Array.isArray(item.images) && item.images.length ? item.images : [item.image]).filter(Boolean)); const extraImgs = productImgs.length ? productImgs : allImgs.filter(img => !variantImgs.includes(img)); if($("image")) $("image").value = extraImgs[0] || allImgs[0] || ""; window.__pendingProductImages = extraImgs.length ? extraImgs : [""]; setTimeout(() => { window.hydrateVariantRows && window.hydrateVariantRows(item); window.hydrateProductImageRows && window.hydrateProductImageRows(window.__pendingProductImages); }, 0); window.scrollTo({top:0, behavior:"smooth"}); }
+  function fillForm(item){ $("docId").value=item.id; $("name").value=item.name||""; $("brand").value=item.brand||""; $("category").value=item.category||"Pods"; $("price").value=item.price||0; $("oldPrice").value=item.oldPrice||0; $("stock").value=item.stock||0; $("sold").value=item.sold||""; $("badge").value=item.badge||""; if($("variants")) $("variants").value = Array.isArray(item.variants) ? item.variants.join("\n") : ""; if($("variantImages")) $("variantImages").value = JSON.stringify(item.variantImages || {}); const variantImgs = item.variantImages && typeof item.variantImages === "object" ? Object.values(item.variantImages).filter(Boolean) : []; const allImgs = (Array.isArray(item.images) && item.images.length ? item.images : [item.image]).filter(Boolean); const extraImgs = allImgs.filter(img => !variantImgs.includes(img)); if($("image")) $("image").value = allImgs[0] || ""; window.__pendingProductImages = extraImgs.length ? extraImgs : [""]; setTimeout(() => { window.hydrateVariantRows && window.hydrateVariantRows(item); window.hydrateProductImageRows && window.hydrateProductImageRows(window.__pendingProductImages); }, 0); window.scrollTo({top:0, behavior:"smooth"}); }
   function renderProductsAdmin(items, source){ $("adminSourceLabel").textContent = source==="firebase" ? "Live from Firebase" : "Using local fallback"; updateStats(items); if(!items.length){ table.innerHTML = '<tr><td colspan="5" class="empty">No products found.</td></tr>'; return; } table.innerHTML = items.map(item => `<tr><td><div style="font-weight:800">${escapeHtml(item.name)}</div><div class="small">${escapeHtml(item.brand)}</div></td><td>${escapeHtml(item.category)}</td><td>${money(item.price)}</td><td>${Number(item.stock||0)}</td><td><div class="row-actions"><button class="btn ghost" data-edit="${item.id}">Edit</button><button class="btn dark" data-delete="${item.id}">Delete</button></div></td></tr>`).join(""); table.querySelectorAll("[data-edit]").forEach(btn => btn.onclick = () => { const item = items.find(x => x.id===btn.dataset.edit); if(item) fillForm(item); }); table.querySelectorAll("[data-delete]").forEach(btn => btn.onclick = async () => { try { await deleteProductItem(btn.dataset.delete); showNotice("Product deleted"); } catch { showNotice("Delete failed"); } }); }
   function receiptNumber(order){
     if(order && order.receiptNo) return String(order.receiptNo);
@@ -1424,11 +1392,10 @@ function initAdmin(){
     if(!tbody || !historyBody) return;
     if(!activeOrders.length) tbody.innerHTML = '<tr><td colspan="6" class="empty">No active orders yet.</td></tr>';
     else {
-      tbody.innerHTML = activeOrders.map(order => `<tr><td><div style="font-weight:800">${escapeHtml(order.receiptNo || order.id || "-")}</div><div class="small">${escapeHtml(order.id||"")}</div></td><td><div style="font-weight:800">${escapeHtml(order.customer?.name||"-")}</div><div class="small">${escapeHtml(order.customer?.phone||"")}</div></td><td>${money(order.total||0)}</td><td><select class="order-status-select" data-order-status="${escapeHtml(order.id||"")}"><option value="Pending" ${order.status==="Pending"?"selected":""}>Pending</option><option value="Preparing" ${order.status==="Preparing"?"selected":""}>Preparing</option><option value="Ready" ${order.status==="Ready"?"selected":""}>Ready</option><option value="Paid" ${order.status==="Paid"?"selected":""}>Paid</option><option value="Completed" ${order.status==="Completed"?"selected":""}>Completed</option></select></td><td>${(order.items||[]).map(i => `${escapeHtml(i.name)} x${Number(i.qty)}<br><span class="small">${escapeHtml(i.size || "")}</span>`).join("<br>")}</td><td><div class="row-actions"><button class="btn dark" data-pay-print="${escapeHtml(order.id||"")}">Paid + Print</button><button class="btn ghost" data-print-order="${escapeHtml(order.id||"")}">Reprint</button><button class="btn danger" data-cancel-order="${escapeHtml(order.id||"")}">Cancel + Restore Stock</button><button class="btn ghost" data-archive-order="${escapeHtml(order.id||"")}">Move to History</button></div></td></tr>`).join("");
+      tbody.innerHTML = activeOrders.map(order => `<tr><td><div style="font-weight:800">${escapeHtml(order.receiptNo || order.id || "-")}</div><div class="small">${escapeHtml(order.id||"")}</div></td><td><div style="font-weight:800">${escapeHtml(order.customer?.name||"-")}</div><div class="small">${escapeHtml(order.customer?.phone||"")}</div></td><td>${money(order.total||0)}</td><td><select class="order-status-select" data-order-status="${escapeHtml(order.id||"")}"><option value="Pending" ${order.status==="Pending"?"selected":""}>Pending</option><option value="Preparing" ${order.status==="Preparing"?"selected":""}>Preparing</option><option value="Ready" ${order.status==="Ready"?"selected":""}>Ready</option><option value="Paid" ${order.status==="Paid"?"selected":""}>Paid</option><option value="Completed" ${order.status==="Completed"?"selected":""}>Completed</option></select></td><td>${(order.items||[]).map(i => `${escapeHtml(i.name)} x${Number(i.qty)}<br><span class="small">${escapeHtml(i.size || "")}</span>`).join("<br>")}</td><td><div class="row-actions"><button class="btn dark" data-pay-print="${escapeHtml(order.id||"")}">Paid + Print</button><button class="btn ghost" data-print-order="${escapeHtml(order.id||"")}">Reprint</button><button class="btn ghost" data-archive-order="${escapeHtml(order.id||"")}">Move to History</button></div></td></tr>`).join("");
       tbody.querySelectorAll("[data-order-status]").forEach(select => select.onchange = async function(){ try { await updateOrderStatus(this.dataset.orderStatus, this.value, activeOrdersCache); showNotice(this.value==="Completed" ? "Order moved to history" : "Order status updated"); } catch { showNotice("Status update failed"); } });
       tbody.querySelectorAll("[data-pay-print]").forEach(btn => btn.onclick = async () => payAndPrintOrder(btn.dataset.payPrint));
       tbody.querySelectorAll("[data-print-order]").forEach(btn => btn.onclick = () => printReceipt(allOrdersForPrint.find(x => x.id === btn.dataset.printOrder)));
-      tbody.querySelectorAll("[data-cancel-order]").forEach(btn => btn.onclick = async () => { try { await cancelOrderAndRestoreStock(btn.dataset.cancelOrder, activeOrdersCache); showNotice("Order cancelled and stock restored"); } catch(error) { showNotice(error.message || "Cancel failed"); } });
       tbody.querySelectorAll("[data-archive-order]").forEach(btn => btn.onclick = async () => { try { await moveOrderToHistory(btn.dataset.archiveOrder, activeOrdersCache); showNotice("Order moved to history"); } catch { showNotice("Move failed"); } });
     }
     if(!historyOrders.length) historyBody.innerHTML = '<tr><td colspan="6" class="empty">No order history yet.</td></tr>';
@@ -1579,9 +1546,8 @@ function initAdmin(){
       variantImages:(window.getVariantData ? window.getVariantData().variantImages : {}),
       variantStocks:(window.getVariantData ? window.getVariantData().variantStocks : {}),
       variantPhotoList:(window.getVariantData ? window.getVariantData().variantPhotoList : []),
-      image:(function(){ const extra = (window.getProductImageUrls ? window.getProductImageUrls() : [$("image").value.trim()]).filter(Boolean); const vd = window.getVariantData ? window.getVariantData() : {variantPhotoList:[]}; const variantImgs = (vd.variantPhotoList || []).map(v => v.image).filter(Boolean); return (extra[0] || variantImgs[0] || ""); })(),
-      productImages:(function(){ const extra = (window.getProductImageUrls ? window.getProductImageUrls() : [$("image").value.trim()]).filter(Boolean); return Array.from(new Set(extra)); })(),
-      images:(function(){ const vd = window.getVariantData ? window.getVariantData() : {variantPhotoList:[]}; const variantImgs = (vd.variantPhotoList || []).map(v => v.image).filter(Boolean); const extra = (window.getProductImageUrls ? window.getProductImageUrls() : [$("image").value.trim()]).filter(Boolean); return Array.from(new Set(extra.concat(variantImgs))); })()
+      image:(function(){ const vd = window.getVariantData ? window.getVariantData() : {variantPhotoList:[]}; const extra = window.getProductImageUrls ? window.getProductImageUrls() : [$("image").value.trim()]; return (vd.variantPhotoList[0]?.image || extra[0] || ""); })(),
+      images:(function(){ const vd = window.getVariantData ? window.getVariantData() : {variantPhotoList:[]}; const variantImgs = (vd.variantPhotoList || []).map(v => v.image).filter(Boolean); const extra = (window.getProductImageUrls ? window.getProductImageUrls() : [$("image").value.trim()]).filter(Boolean); return Array.from(new Set(variantImgs.concat(extra))); })()
     }; try { await saveProduct(payload, docId || null); clearForm(); showNotice("Product saved"); } catch { showNotice("Save failed"); } };
   $("clearFormBtn").onclick = clearForm;
   $("seedBtn").onclick = async () => { try { await seedProducts(); showNotice("Demo products added"); } catch (error) { showNotice(error.message || "Seed failed"); } };
