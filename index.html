@@ -7,6 +7,28 @@
   <link rel="stylesheet" href="./styles-v3.css" />
 </head>
 <body data-page="shop">
+  <!-- PRO 18+ AGE GATE -->
+  <div id="ageGate" class="age-gate hidden">
+    <div class="age-box pro-age-box">
+      <div class="age-badge">18+</div>
+      <h2>Age Verification</h2>
+      <p id="ageIntro">You must be at least <strong>18 years old</strong> to enter this vape shop.</p>
+      <div class="terms-box" id="termsBox">
+        <h4>Terms & Conditions</h4>
+        <p id="ageTermsText">By entering this website, you confirm that you are at least 18 years old. Vape products are intended for adults only. Please follow local laws and regulations regarding vape usage. By continuing, you accept full responsibility for your actions.</p>
+      </div>
+      <label class="check age-check">
+        <input type="checkbox" id="agreeCheck" />
+        <span>I confirm that I am 18+ and agree to the Terms & Conditions.</span>
+      </label>
+      <div class="age-actions">
+        <button id="enterBtn" class="btn dark" type="button" disabled>ENTER SHOP</button>
+        <button id="declineBtn" class="btn danger" type="button">DECLINE</button>
+      </div>
+      <small class="age-note">Your confirmation is saved for 24 hours.</small>
+    </div>
+  </div>
+
   <div class="app">
     <header class="topbar">
       <div class="topbar-inner">
@@ -251,6 +273,25 @@
 
 
   <div class="notice" id="notice"></div>
+
+
+  <script>
+    (function(){
+      var SETTINGS_KEY='mrVapeAgeGateSettings', VERIFIED_KEY='mrVapeAgeVerifiedAt';
+      var defaults={enabled:true,minimumAge:18,expiryHours:24,terms:'By entering this website, you confirm that you are at least 18 years old. Vape products are intended for adults only. Please follow local laws and regulations regarding vape usage. By continuing, you accept full responsibility for your actions.'};
+      function getSettings(){try{return Object.assign({},defaults,JSON.parse(localStorage.getItem(SETTINGS_KEY)||'{}'));}catch(e){return defaults;}}
+      var settings=getSettings(), gate=document.getElementById('ageGate'); if(!gate)return;
+      var check=document.getElementById('agreeCheck'), enterBtn=document.getElementById('enterBtn'), declineBtn=document.getElementById('declineBtn');
+      document.getElementById('ageIntro').innerHTML='You must be at least <strong>'+settings.minimumAge+' years old</strong> to enter this vape shop.';
+      document.getElementById('ageTermsText').textContent=settings.terms||defaults.terms;
+      document.querySelector('.age-note').textContent='Your confirmation is saved for '+settings.expiryHours+' hours.';
+      var verifiedAt=Number(localStorage.getItem(VERIFIED_KEY)||0), stillValid=verifiedAt&&(Date.now()-verifiedAt)<(Number(settings.expiryHours||24)*60*60*1000);
+      if(!settings.enabled||stillValid){gate.classList.add('hidden');}else{gate.classList.remove('hidden');document.body.classList.add('age-locked');}
+      check.addEventListener('change',function(){enterBtn.disabled=!check.checked;});
+      enterBtn.addEventListener('click',function(){localStorage.setItem(VERIFIED_KEY,String(Date.now()));gate.classList.add('hidden');document.body.classList.remove('age-locked');});
+      declineBtn.addEventListener('click',function(){window.location.href='https://www.google.com';});
+    })();
+  </script>
 
   <script type="module" src="./app-v3.js"></script>
 </body>

@@ -933,3 +933,29 @@ html,body{background:radial-gradient(circle at top,#182033 0,#05070c 45%,#030407
 .panel-head.compact{margin-bottom:8px}
 .empty.mini{padding:14px;color:#94a3b8;text-align:center;border:1px dashed rgba(148,163,184,.18);border-radius:14px}
 @media (max-width:900px){.pos-layout,.pos-form-grid{grid-template-columns:1fr}}
+
+
+
+/* === PRO 18+ AGE GATE === */
+.age-locked{overflow:hidden;}
+.age-gate{position:fixed;inset:0;background:radial-gradient(circle at top,#1e1b4b 0,#020617 42%,#000 100%);display:flex;align-items:center;justify-content:center;z-index:99999;padding:18px;}
+.age-gate.hidden{display:none!important;}
+.pro-age-box{width:min(92vw,430px);background:rgba(15,23,42,.96);border:1px solid rgba(148,163,184,.25);border-radius:24px;color:#f8fafc;text-align:center;padding:26px;box-shadow:0 22px 70px rgba(0,0,0,.65),0 0 42px rgba(99,102,241,.16);}
+.age-badge{width:72px;height:72px;margin:0 auto 12px;border-radius:50%;display:grid;place-items:center;background:linear-gradient(135deg,#ef4444,#7c3aed);font-size:24px;font-weight:900;box-shadow:0 0 24px rgba(124,58,237,.45);}
+.pro-age-box h2{margin:0 0 8px;font-size:26px;}
+.pro-age-box p{color:#cbd5e1;line-height:1.5;}
+.terms-box{height:138px;overflow:auto;text-align:left;background:#020617;border:1px solid #1e293b;border-radius:16px;padding:14px;margin:16px 0;}
+.terms-box h4{margin:0 0 8px;color:#fff;}
+.terms-box p{margin:0;font-size:13px;color:#94a3b8;}
+.age-check{display:flex;align-items:flex-start;gap:10px;text-align:left;font-size:13px;color:#e2e8f0;margin:12px 0;}
+.age-check input{margin-top:3px;accent-color:#7c3aed;}
+.age-actions{display:flex;gap:10px;margin-top:14px;}
+.age-actions .btn{flex:1;justify-content:center;}
+.btn.danger,.decline{background:#7f1d1d!important;color:#fff!important;border-color:#991b1b!important;}
+#enterBtn:disabled{background:#334155!important;color:#94a3b8!important;cursor:not-allowed;box-shadow:none;}
+.age-note{display:block;color:#64748b;margin-top:12px;}
+.toggle-row{display:flex!important;align-items:center;justify-content:space-between;gap:14px;background:#020617;border:1px solid #1e293b;border-radius:14px;padding:14px;color:#e2e8f0;}
+.toggle-row input{width:20px;height:20px;accent-color:#7c3aed;}
+.age-settings-actions{display:flex;flex-wrap:wrap;gap:10px;margin-top:12px;}
+.age-settings-form textarea{min-height:150px;resize:vertical;}
+@media(max-width:520px){.age-actions{flex-direction:column}.pro-age-box{padding:20px}.terms-box{height:120px}}

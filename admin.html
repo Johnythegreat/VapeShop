@@ -16,6 +16,7 @@
       <button class="side-link admin-tab-btn" type="button" data-tab="pos">Barcode POS</button>
       <button class="side-link admin-tab-btn" type="button" data-tab="customers">Customers</button>
       <button class="side-link admin-tab-btn" type="button" data-tab="messages">Messages</button>
+      <button class="side-link admin-tab-btn" type="button" data-tab="agegate">18+ Gate</button>
     </aside>
 
     <main class="admin-main">
@@ -281,10 +282,69 @@
       </div>
 
 
+      <div id="tab-agegate" class="admin-tab-panel hidden">
+        <section class="panel">
+          <div class="panel-head">
+            <h2>18+ Terms Gate</h2>
+            <p>Control the age verification popup before customers enter the vape shop.</p>
+          </div>
+          <div class="admin-form age-settings-form">
+            <label class="toggle-row">
+              <span>Enable 18+ gate</span>
+              <input id="ageGateEnabled" type="checkbox" checked />
+            </label>
+            <div class="form-grid">
+              <label>Minimum Age
+                <select id="ageGateMinimumAge">
+                  <option value="18">18+</option>
+                  <option value="21">21+</option>
+                </select>
+              </label>
+              <label>Remember customer for
+                <select id="ageGateExpiry">
+                  <option value="1">1 hour</option>
+                  <option value="12">12 hours</option>
+                  <option value="24" selected>24 hours</option>
+                  <option value="168">7 days</option>
+                </select>
+              </label>
+            </div>
+            <label>Terms & Conditions Text
+              <textarea id="ageGateTerms" rows="7">By entering this website, you confirm that you are at least 18 years old. Vape products are intended for adults only. Please follow local laws and regulations regarding vape usage. By continuing, you accept full responsibility for your actions.</textarea>
+            </label>
+            <div class="age-settings-actions">
+              <button class="btn dark" id="saveAgeGateSettings" type="button">Save Age Gate Settings</button>
+              <button class="btn ghost" id="previewAgeGate" type="button">Preview on Customer Page</button>
+              <button class="btn danger" id="resetAgeGateVisitors" type="button">Force Show Again</button>
+            </div>
+            <p class="form-hint">Force Show Again clears the saved 18+ confirmation on this browser for testing.</p>
+          </div>
+        </section>
+      </div>
+
+
     </main>
   </div>
 
   <div class="notice" id="notice"></div>
+
+
+  <script>
+    (function(){
+      var SETTINGS_KEY='mrVapeAgeGateSettings', VERIFIED_KEY='mrVapeAgeVerifiedAt';
+      var defaults={enabled:true,minimumAge:18,expiryHours:24,terms:'By entering this website, you confirm that you are at least 18 years old. Vape products are intended for adults only. Please follow local laws and regulations regarding vape usage. By continuing, you accept full responsibility for your actions.'};
+      function load(){try{return Object.assign({},defaults,JSON.parse(localStorage.getItem(SETTINGS_KEY)||'{}'));}catch(e){return defaults;}}
+      function ready(){
+        var enabled=document.getElementById('ageGateEnabled'); if(!enabled)return;
+        var minAge=document.getElementById('ageGateMinimumAge'), expiry=document.getElementById('ageGateExpiry'), terms=document.getElementById('ageGateTerms'), save=document.getElementById('saveAgeGateSettings'), preview=document.getElementById('previewAgeGate'), reset=document.getElementById('resetAgeGateVisitors'), settings=load();
+        enabled.checked=!!settings.enabled; minAge.value=String(settings.minimumAge||18); expiry.value=String(settings.expiryHours||24); terms.value=settings.terms||defaults.terms;
+        save.addEventListener('click',function(){localStorage.setItem(SETTINGS_KEY,JSON.stringify({enabled:enabled.checked,minimumAge:Number(minAge.value),expiryHours:Number(expiry.value),terms:terms.value.trim()||defaults.terms}));alert('18+ age gate settings saved.');});
+        preview.addEventListener('click',function(){localStorage.removeItem(VERIFIED_KEY);window.open('./index.html','_blank');});
+        reset.addEventListener('click',function(){localStorage.removeItem(VERIFIED_KEY);alert('Saved 18+ confirmation cleared on this browser.');});
+      }
+      if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',ready);else ready();
+    })();
+  </script>
 
   <script type="module" src="./app-v3.js"></script>
 </body>
