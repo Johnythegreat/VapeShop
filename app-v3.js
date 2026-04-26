@@ -264,26 +264,64 @@ async function saveCustomerProfile(account){
 async function createOrder(cart, account, shippingInfo={}){
   if(getMode()==="firebase" && firebaseReady){
     await runTransaction(db, async (transaction) => {
-      const liveItems = [];
+      // Firestore transactions must finish ALL reads before ANY writes.
+      // This also supports carts with multiple variants from the same product.
+      const refsById = new Map();
       for(const item of cart){
-        const ref = doc(db, "products", item.id); const snap = await transaction.get(ref);
-        if(!snap.exists()) throw new Error(item.name + " not found");
-        const data = snap.data();
+        if(item && item.id && !refsById.has(item.id)){
+          refsById.set(item.id, doc(db, "products", item.id));
+        }
+      }
+
+      const snapsById = new Map();
+      for(const [id, ref] of refsById.entries()){
+        const snap = await transaction.get(ref);
+        if(!snap.exists()) throw new Error("Product not found");
+        snapsById.set(id, snap);
+      }
+
+      const liveItems = [];
+      const updatesById = new Map();
+
+      for(const item of cart){
+        const snap = snapsById.get(item.id);
+        const originalData = snap.data();
+        const draft = updatesById.get(item.id) || {
+          ref: refsById.get(item.id),
+          data: {
+            ...originalData,
+            variantStocks: (originalData.variantStocks && typeof originalData.variantStocks === "object") ? { ...originalData.variantStocks } : undefined,
+            stock: Number(originalData.stock || 0)
+          }
+        };
+
+        const data = draft.data;
         const qty = Number(item.qty || 0);
         const selectedVariant = item.size || item.variant || "Default";
-        const variantStocks = (data.variantStocks && typeof data.variantStocks === "object") ? { ...data.variantStocks } : {};
+        const variantStocks = (data.variantStocks && typeof data.variantStocks === "object") ? data.variantStocks : {};
+
         if(Object.keys(variantStocks).length && Object.prototype.hasOwnProperty.call(variantStocks, selectedVariant)){
           const vStock = Number(variantStocks[selectedVariant] || 0);
-          if(vStock < qty) throw new Error("Not enough stock for " + item.name + " - " + selectedVariant);
+          if(vStock < qty) throw new Error("Not enough stock for " + (originalData.name || item.name) + " - " + selectedVariant);
           variantStocks[selectedVariant] = vStock - qty;
-          transaction.update(ref, { variantStocks, stock: sumVariantStocks(variantStocks) });
+          data.variantStocks = variantStocks;
+          data.stock = sumVariantStocks(variantStocks);
         } else {
           const stock = Number(data.stock || 0);
-          if(stock < qty) throw new Error("Not enough stock for " + item.name);
-          transaction.update(ref, { stock: stock - qty });
+          if(stock < qty) throw new Error("Not enough stock for " + (originalData.name || item.name));
+          data.stock = stock - qty;
         }
-        liveItems.push({ name:data.name, qty, price:Number(data.price), productId:item.id, size:selectedVariant, image:item.image || "" });
+
+        updatesById.set(item.id, draft);
+        liveItems.push({ name:originalData.name || item.name, qty, price:Number(originalData.price || item.price || 0), productId:item.id, size:selectedVariant, image:item.image || "" });
       }
+
+      for(const update of updatesById.values()){
+        const payload = { stock: Number(update.data.stock || 0) };
+        if(update.data.variantStocks && typeof update.data.variantStocks === "object") payload.variantStocks = update.data.variantStocks;
+        transaction.update(update.ref, payload);
+      }
+
       const orderRef = doc(collection(db, "orders"));
       transaction.set(orderRef, { customer:account, items:liveItems, subtotal:cartSubtotal(liveItems), shippingFee:Number(shippingInfo.fee || 0), shippingZone:shippingInfo.zone || "", total:totalAmount(liveItems, shippingInfo.fee), status:"Pending", createdAt:serverTimestamp() });
     });
@@ -1133,25 +1171,60 @@ async function createPosSale(cart, account={}, payment={}){
   if(getMode()==="firebase" && firebaseReady){
     let orderId = receiptNo;
     await runTransaction(db, async (transaction) => {
+      // Firestore transactions must finish ALL reads before ANY writes.
+      const refsById = new Map();
       for(const item of cart){
-        const ref = doc(db, "products", item.id);
-        const snap = await transaction.get(ref);
-        if(!snap.exists()) throw new Error(item.name + " not found");
-        const data = snap.data();
-        const qty = Number(item.qty || 1);
-        const selectedVariant = item.size || item.variant || "Default";
-        const variantStocks = (data.variantStocks && typeof data.variantStocks === "object") ? { ...data.variantStocks } : {};
-        if(Object.keys(variantStocks).length && Object.prototype.hasOwnProperty.call(variantStocks, selectedVariant)){
-          const current = Number(variantStocks[selectedVariant] || 0);
-          if(current < qty) throw new Error("Not enough stock for " + item.name + " - " + selectedVariant);
-          variantStocks[selectedVariant] = current - qty;
-          transaction.update(ref, { variantStocks, stock: sumVariantStocks(variantStocks) });
-        } else {
-          const stock = Number(data.stock || 0);
-          if(stock < qty) throw new Error("Not enough stock for " + item.name);
-          transaction.update(ref, { stock: stock - qty });
+        if(item && item.id && !refsById.has(item.id)){
+          refsById.set(item.id, doc(db, "products", item.id));
         }
       }
+
+      const snapsById = new Map();
+      for(const [id, ref] of refsById.entries()){
+        const snap = await transaction.get(ref);
+        if(!snap.exists()) throw new Error("Product not found");
+        snapsById.set(id, snap);
+      }
+
+      const updatesById = new Map();
+      for(const item of cart){
+        const snap = snapsById.get(item.id);
+        const originalData = snap.data();
+        const draft = updatesById.get(item.id) || {
+          ref: refsById.get(item.id),
+          data: {
+            ...originalData,
+            variantStocks: (originalData.variantStocks && typeof originalData.variantStocks === "object") ? { ...originalData.variantStocks } : undefined,
+            stock: Number(originalData.stock || 0)
+          }
+        };
+
+        const data = draft.data;
+        const qty = Number(item.qty || 1);
+        const selectedVariant = item.size || item.variant || "Default";
+        const variantStocks = (data.variantStocks && typeof data.variantStocks === "object") ? data.variantStocks : {};
+
+        if(Object.keys(variantStocks).length && Object.prototype.hasOwnProperty.call(variantStocks, selectedVariant)){
+          const current = Number(variantStocks[selectedVariant] || 0);
+          if(current < qty) throw new Error("Not enough stock for " + (originalData.name || item.name) + " - " + selectedVariant);
+          variantStocks[selectedVariant] = current - qty;
+          data.variantStocks = variantStocks;
+          data.stock = sumVariantStocks(variantStocks);
+        } else {
+          const stock = Number(data.stock || 0);
+          if(stock < qty) throw new Error("Not enough stock for " + (originalData.name || item.name));
+          data.stock = stock - qty;
+        }
+
+        updatesById.set(item.id, draft);
+      }
+
+      for(const update of updatesById.values()){
+        const payload = { stock: Number(update.data.stock || 0) };
+        if(update.data.variantStocks && typeof update.data.variantStocks === "object") payload.variantStocks = update.data.variantStocks;
+        transaction.update(update.ref, payload);
+      }
+
       const orderRef = doc(collection(db, "order_history"));
       orderId = orderRef.id;
       transaction.set(orderRef, { ...orderPayload, createdAt:serverTimestamp(), paidAt:serverTimestamp(), movedAt:serverTimestamp() });
