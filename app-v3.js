@@ -1042,9 +1042,81 @@ function initShop(){
   if($("inquiryModal")) $("inquiryModal").onclick = (e) => { if(e.target.id === "inquiryModal") closeInquiry(); };
 }
 
+async function createPosSale(cart, account={}, payment={}){
+  const receiptNo = payment.receiptNo || ("MRV-" + new Date().toISOString().slice(2,10).replace(/-/g,"") + "-" + Date.now().toString().slice(-6));
+  const cleanItems = cart.map(item => ({
+    name:item.name,
+    qty:Number(item.qty || 1),
+    price:Number(item.price || 0),
+    productId:item.id,
+    size:item.size || item.variant || "Default",
+    image:item.image || ""
+  }));
+  const total = totalAmount(cleanItems);
+  const orderPayload = {
+    customer:{ name:account.name || "Walk-in Customer", phone:account.phone || "", address:account.address || "" },
+    items:cleanItems,
+    total,
+    status:"Completed",
+    paymentStatus:"Paid",
+    paymentMethod:payment.paymentMethod || "Cash",
+    cashReceived:Number(payment.cashReceived || total),
+    change:Math.max(0, Number(payment.cashReceived || total) - total),
+    receiptNo,
+    cashier:"Admin POS"
+  };
+  if(getMode()==="firebase" && firebaseReady){
+    let orderId = receiptNo;
+    await runTransaction(db, async (transaction) => {
+      for(const item of cart){
+        const ref = doc(db, "products", item.id);
+        const snap = await transaction.get(ref);
+        if(!snap.exists()) throw new Error(item.name + " not found");
+        const data = snap.data();
+        const qty = Number(item.qty || 1);
+        const selectedVariant = item.size || item.variant || "Default";
+        const variantStocks = (data.variantStocks && typeof data.variantStocks === "object") ? { ...data.variantStocks } : {};
+        if(Object.keys(variantStocks).length && Object.prototype.hasOwnProperty.call(variantStocks, selectedVariant)){
+          const current = Number(variantStocks[selectedVariant] || 0);
+          if(current < qty) throw new Error("Not enough stock for " + item.name + " - " + selectedVariant);
+          variantStocks[selectedVariant] = current - qty;
+          transaction.update(ref, { variantStocks, stock: sumVariantStocks(variantStocks) });
+        } else {
+          const stock = Number(data.stock || 0);
+          if(stock < qty) throw new Error("Not enough stock for " + item.name);
+          transaction.update(ref, { stock: stock - qty });
+        }
+      }
+      const orderRef = doc(collection(db, "order_history"));
+      orderId = orderRef.id;
+      transaction.set(orderRef, { ...orderPayload, createdAt:serverTimestamp(), paidAt:serverTimestamp(), movedAt:serverTimestamp() });
+    });
+    return { id:orderId, ...orderPayload, paidAt:new Date().toISOString() };
+  }
+  const products = getLocalProducts();
+  for(const item of cart){
+    const p = products.find(x => x.id === item.id);
+    if(!p || getVariantStock(p, item.size) < Number(item.qty || 1)) throw new Error("Not enough stock for " + item.name + (item.size ? " - " + item.size : ""));
+  }
+  for(const item of cart){
+    const p = products.find(x => x.id === item.id);
+    const map = variantStockMap(p);
+    if(item.size && Object.prototype.hasOwnProperty.call(map, item.size)){
+      p.variantStocks = { ...map, [item.size]: Number(map[item.size] || 0) - Number(item.qty || 1) };
+      p.stock = sumVariantStocks(p.variantStocks);
+    } else {
+      p.stock = Number(p.stock || 0) - Number(item.qty || 1);
+    }
+  }
+  setLocalProducts(products);
+  const history = getLocalHistory();
+  const order = { id:"POS-" + Date.now(), ...orderPayload, createdAt:new Date().toISOString(), paidAt:new Date().toISOString(), movedAt:new Date().toISOString() };
+  history.unshift(order); setLocalHistory(history);
+  return order;
+}
 
 function initAdmin(){
-  bindNoticeButtons(); const form = $("productForm"), table = $("adminProductTable"); let activeOrdersCache = [];
+  bindNoticeButtons(); const form = $("productForm"), table = $("adminProductTable"); let activeOrdersCache = []; let adminProductsCache = []; let posCart = []; let selectedPosProduct = null;
   const topActions = document.querySelector(".top-actions-wrap");
   if(topActions && !document.getElementById("logoutAdminBtn")){
     const logoutBtn = document.createElement("button");
@@ -1147,10 +1219,75 @@ function initAdmin(){
   function renderCustomers(customers){ const tbody = $("customersTable"); if(!tbody) return; if(!customers.length){ tbody.innerHTML = '<tr><td colspan="4" class="empty">No customers yet.</td></tr>'; return; } tbody.innerHTML = customers.map(customer => `<tr><td>${escapeHtml(customer.name||"-")}</td><td>${escapeHtml(customer.phone||"-")}</td><td>${escapeHtml(customer.email||"-")}</td><td>${escapeHtml(customer.address||"-")}</td></tr>`).join(""); }
   function switchTab(tabName){ document.querySelectorAll(".admin-tab-panel").forEach(panel => panel.classList.add("hidden")); const target = $("tab-"+tabName); if(target) target.classList.remove("hidden"); document.querySelectorAll(".admin-tab-btn").forEach(btn => btn.classList.toggle("active", btn.dataset.tab===tabName)); }
 
+  function posProductCode(product){ return String(product.barcode || product.sku || product.id || ""); }
+  function selectPosProduct(product){
+    selectedPosProduct = product || null;
+    const box = $("posSelectedBox"), variantSelect = $("posVariantSelect");
+    if(!box || !variantSelect) return;
+    if(!product){ box.textContent = "No product selected."; variantSelect.innerHTML = ""; return; }
+    const variants = Array.isArray(product.variants) && product.variants.length ? product.variants : ["Default"];
+    variantSelect.innerHTML = variants.map(v => `<option value="${escapeHtml(v)}">${escapeHtml(v)} - Stock: ${getVariantStock(product, v)}</option>`).join("");
+    box.innerHTML = `<strong>${escapeHtml(product.name)}</strong><span>${money(product.price)} • Code: ${escapeHtml(posProductCode(product))}</span>`;
+  }
+  function renderPosSearch(term=""){
+    const results = $("posSearchResults"); if(!results) return;
+    const q = String(term || "").trim().toLowerCase();
+    const list = (q ? adminProductsCache.filter(p => [p.id,p.name,p.brand,p.category,p.barcode,p.sku].some(v => String(v || "").toLowerCase().includes(q))) : adminProductsCache.slice(0,8)).slice(0,8);
+    if(!list.length){ results.innerHTML = '<div class="empty mini">No product found.</div>'; return; }
+    results.innerHTML = list.map(p => `<button type="button" class="pos-result" data-pos-pick="${escapeHtml(p.id)}"><span><strong>${escapeHtml(p.name)}</strong><small>${escapeHtml(p.brand || p.category || "")} • Stock ${Number(p.stock||0)}</small></span><b>${money(p.price)}</b></button>`).join("");
+    results.querySelectorAll('[data-pos-pick]').forEach(btn => btn.onclick = () => selectPosProduct(adminProductsCache.find(p => p.id === btn.dataset.posPick)));
+    const exact = q && adminProductsCache.find(p => String(p.id).toLowerCase() === q || String(p.barcode || "").toLowerCase() === q || String(p.sku || "").toLowerCase() === q);
+    if(exact) selectPosProduct(exact);
+  }
+  function renderPosCart(){
+    const view = $("posCartView"), count = $("posCartCount"), totalEl = $("posTotal"), changeEl = $("posChange");
+    const total = totalAmount(posCart);
+    if(count) count.textContent = posCart.length + (posCart.length === 1 ? " item" : " items");
+    if(totalEl) totalEl.textContent = money(total);
+    const cash = Number($("posCash")?.value || 0);
+    if(changeEl) changeEl.textContent = money(Math.max(0, cash - total));
+    if(!view) return;
+    if(!posCart.length){ view.innerHTML = '<div class="empty mini">POS cart is empty.</div>'; return; }
+    view.innerHTML = posCart.map((item, idx) => `<div class="pos-cart-item"><div><strong>${escapeHtml(item.name)}</strong><small>${escapeHtml(item.size || "Default")} • ${money(item.price)} x ${Number(item.qty)}</small></div><div><b>${money(Number(item.price)*Number(item.qty))}</b><button type="button" data-pos-remove="${idx}">×</button></div></div>`).join("");
+    view.querySelectorAll('[data-pos-remove]').forEach(btn => btn.onclick = () => { posCart.splice(Number(btn.dataset.posRemove), 1); renderPosCart(); });
+  }
+  function setupBarcodePos(){
+    const scan = $("posScanInput"), addBtn = $("posAddBtn"), payBtn = $("posPayBtn"), clearBtn = $("posClearBtn"), cash = $("posCash");
+    if(!scan || !addBtn || !payBtn) return;
+    scan.addEventListener('input', () => renderPosSearch(scan.value));
+    scan.addEventListener('keydown', (e) => { if(e.key === 'Enter'){ e.preventDefault(); renderPosSearch(scan.value); $("posQty")?.focus(); } });
+    addBtn.onclick = () => {
+      if(!selectedPosProduct){ showNotice("Select a product first"); return; }
+      const variant = $("posVariantSelect")?.value || "Default";
+      const qty = Math.max(1, Number($("posQty")?.value || 1));
+      const available = getVariantStock(selectedPosProduct, variant);
+      const existingQty = posCart.filter(i => i.id === selectedPosProduct.id && i.size === variant).reduce((a,b)=>a+Number(b.qty||0),0);
+      if(available < existingQty + qty){ showNotice("Not enough stock for " + variant); return; }
+      const existing = posCart.find(i => i.id === selectedPosProduct.id && i.size === variant);
+      if(existing) existing.qty = Number(existing.qty) + qty;
+      else posCart.push({ id:selectedPosProduct.id, name:selectedPosProduct.name, price:Number(selectedPosProduct.price || 0), qty, size:variant, image:(selectedPosProduct.variantImages && selectedPosProduct.variantImages[variant]) || firstProductImage(selectedPosProduct) });
+      $("posQty").value = 1; scan.value = ""; renderPosSearch(""); renderPosCart(); showNotice("Added to POS cart"); scan.focus();
+    };
+    if(cash) cash.addEventListener('input', renderPosCart);
+    clearBtn && (clearBtn.onclick = () => { posCart = []; selectedPosProduct = null; selectPosProduct(null); if(scan) scan.value = ""; renderPosSearch(""); renderPosCart(); });
+    payBtn.onclick = async () => {
+      if(!posCart.length){ showNotice("POS cart is empty"); return; }
+      const total = totalAmount(posCart);
+      const cashReceived = Number($("posCash")?.value || total);
+      const method = $("posPaymentMethod")?.value || "Cash";
+      if(method === "Cash" && cashReceived < total){ showNotice("Cash received is lower than total"); return; }
+      try{
+        const order = await createPosSale(posCart, { name:$("posCustomerName")?.value || "Walk-in Customer", phone:$("posCustomerPhone")?.value || "" }, { paymentMethod:method, cashReceived });
+        posCart = []; renderPosCart(); if($("posCash")) $("posCash").value = ""; showNotice("Paid. Opening receipt..."); printReceipt(order);
+      }catch(error){ showNotice(error.message || "POS payment failed"); }
+    };
+    renderPosSearch(""); renderPosCart();
+  }
+
   if($("adminReplyImage")) $("adminReplyImage").onchange = () => setImagePreview("adminReplyImage", "adminReplyImagePreviewWrap", "adminReplyImagePreview", "adminReplyImageName");
   if($("removeAdminReplyImageBtn")) $("removeAdminReplyImageBtn").onclick = () => clearFileInput("adminReplyImage", "adminReplyImagePreviewWrap", "adminReplyImagePreview", "adminReplyImageName");
 
-  subscribeProducts((items, source) => renderProductsAdmin(items, source));
+  subscribeProducts((items, source) => { adminProductsCache = items; renderProductsAdmin(items, source); renderPosSearch($("posScanInput")?.value || ""); });
   subscribeOrders((activeOrders, historyOrders) => renderOrders(activeOrders, historyOrders));
   subscribeCustomers((customers) => renderCustomers(customers));
   let __lastAdminMessageCount = 0;
@@ -1160,6 +1297,7 @@ function initAdmin(){
     renderMessages(messages);
   });
   document.querySelectorAll(".admin-tab-btn").forEach(btn => btn.onclick = () => switchTab(btn.dataset.tab));
+  setupBarcodePos();
   switchTab("products");
   form.onsubmit = async (e) => { e.preventDefault(); const docId = $("docId").value.trim(); const payload = {
       name:$("name").value.trim(),

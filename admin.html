@@ -12,7 +12,8 @@
       <div class="sidebar-logo">MR VAPE SHOP ADMIN</div>
       <a href="./index.html" class="side-link">← Customer Page</a>
       <button class="side-link active admin-tab-btn" type="button" data-tab="products">Products</button>
-      <button class="side-link admin-tab-btn" type="button" data-tab="orders">POS / Orders</button>
+      <button class="side-link admin-tab-btn" type="button" data-tab="orders">Orders</button>
+      <button class="side-link admin-tab-btn" type="button" data-tab="pos">Barcode POS</button>
       <button class="side-link admin-tab-btn" type="button" data-tab="customers">Customers</button>
       <button class="side-link admin-tab-btn" type="button" data-tab="messages">Messages</button>
     </aside>
@@ -124,6 +125,65 @@
                 </thead>
                 <tbody id="adminProductTable"></tbody>
               </table>
+            </div>
+          </div>
+        </section>
+      </div>
+
+      <div id="tab-pos" class="admin-tab-panel hidden">
+        <section class="panel">
+          <div class="panel-head">
+            <h2>Barcode POS / Walk-in Sale</h2>
+            <p>Scan or type a product code/name, choose variant, add to POS cart, then complete payment and print receipt.</p>
+          </div>
+          <div class="pos-layout">
+            <div class="pos-card">
+              <label class="pos-label">Scan Barcode / Search Product
+                <input id="posScanInput" placeholder="Scan barcode, product ID, or type product name" autocomplete="off" />
+              </label>
+              <div class="pos-search-results" id="posSearchResults"></div>
+              <div class="pos-selected" id="posSelectedBox">No product selected.</div>
+              <div class="pos-form-grid">
+                <label>Variant / Flavor / Color
+                  <select id="posVariantSelect"></select>
+                </label>
+                <label>Qty
+                  <input id="posQty" type="number" min="1" value="1" />
+                </label>
+              </div>
+              <button class="btn dark" type="button" id="posAddBtn">Add to POS Cart</button>
+            </div>
+            <div class="pos-card">
+              <div class="panel-head compact">
+                <h2>POS Cart</h2>
+                <p id="posCartCount">0 item</p>
+              </div>
+              <div id="posCartView" class="pos-cart-view"></div>
+              <div class="pos-total-row"><span>Total</span><strong id="posTotal">₱0</strong></div>
+              <div class="pos-form-grid">
+                <label>Customer Name
+                  <input id="posCustomerName" placeholder="Walk-in Customer" />
+                </label>
+                <label>Customer Phone
+                  <input id="posCustomerPhone" placeholder="Optional" />
+                </label>
+                <label>Cash Received
+                  <input id="posCash" type="number" min="0" placeholder="0" />
+                </label>
+                <label>Payment
+                  <select id="posPaymentMethod">
+                    <option value="Cash">Cash</option>
+                    <option value="GCash">GCash</option>
+                    <option value="Bank Transfer">Bank Transfer</option>
+                    <option value="Other">Other</option>
+                  </select>
+                </label>
+              </div>
+              <div class="pos-change-row"><span>Change</span><strong id="posChange">₱0</strong></div>
+              <div class="form-actions">
+                <button class="btn dark" type="button" id="posPayBtn">Paid + Print Receipt</button>
+                <button class="btn ghost" type="button" id="posClearBtn">Clear POS</button>
+              </div>
             </div>
           </div>
         </section>

@@ -827,3 +827,109 @@ html,body{background:radial-gradient(circle at top,#182033 0,#05070c 45%,#030407
   font-size:11px;
   opacity:.9;
 }
+
+/* === Barcode POS / Order System Upgrade === */
+.pos-layout{
+  display:grid;
+  grid-template-columns: minmax(280px, .9fr) minmax(320px, 1.1fr);
+  gap:18px;
+}
+.pos-card{
+  background:linear-gradient(180deg, rgba(15,23,42,.96), rgba(2,6,23,.98));
+  border:1px solid rgba(148,163,184,.18);
+  border-radius:20px;
+  padding:16px;
+  box-shadow:0 18px 50px rgba(0,0,0,.22);
+}
+.pos-label, .pos-form-grid label{
+  display:flex;
+  flex-direction:column;
+  gap:7px;
+  color:#dbeafe;
+  font-weight:800;
+  font-size:13px;
+}
+.pos-label input, .pos-form-grid input, .pos-form-grid select{
+  width:100%;
+  border:1px solid rgba(56,189,248,.28);
+  background:#020617;
+  color:#f8fafc;
+  border-radius:14px;
+  min-height:44px;
+  padding:0 13px;
+  outline:none;
+}
+.pos-form-grid{
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:12px;
+  margin:14px 0;
+}
+.pos-search-results{
+  display:grid;
+  gap:8px;
+  margin:12px 0;
+  max-height:260px;
+  overflow:auto;
+}
+.pos-result{
+  border:1px solid rgba(56,189,248,.18);
+  background:#07111f;
+  color:#f8fafc;
+  border-radius:14px;
+  padding:10px 12px;
+  cursor:pointer;
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  text-align:left;
+}
+.pos-result:hover{border-color:#22d3ee;background:#0f172a}
+.pos-result span{display:flex;flex-direction:column;gap:3px}
+.pos-result small{color:#94a3b8;font-size:11px}
+.pos-selected{
+  border:1px dashed rgba(125,211,252,.35);
+  color:#e0f2fe;
+  padding:12px;
+  border-radius:14px;
+  min-height:52px;
+  display:flex;
+  flex-direction:column;
+  gap:4px;
+  background:rgba(14,165,233,.07);
+}
+.pos-selected span{color:#93c5fd;font-size:12px}
+.pos-cart-view{display:grid;gap:8px;min-height:160px;max-height:300px;overflow:auto;margin:10px 0}
+.pos-cart-item{
+  display:flex;
+  justify-content:space-between;
+  gap:10px;
+  background:#07111f;
+  border:1px solid rgba(148,163,184,.16);
+  padding:10px;
+  border-radius:14px;
+}
+.pos-cart-item small{display:block;color:#94a3b8;margin-top:3px}
+.pos-cart-item button{
+  margin-left:8px;
+  border:0;
+  border-radius:10px;
+  background:#7f1d1d;
+  color:#fff;
+  width:28px;
+  height:28px;
+  cursor:pointer;
+}
+.pos-total-row,.pos-change-row{
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  padding:12px 0;
+  border-top:1px solid rgba(148,163,184,.18);
+  color:#cbd5e1;
+}
+.pos-total-row strong{font-size:24px;color:#22d3ee}
+.pos-change-row strong{font-size:20px;color:#a78bfa}
+.panel-head.compact{margin-bottom:8px}
+.empty.mini{padding:14px;color:#94a3b8;text-align:center;border:1px dashed rgba(148,163,184,.18);border-radius:14px}
+@media (max-width:900px){.pos-layout,.pos-form-grid{grid-template-columns:1fr}}
