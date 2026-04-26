@@ -341,7 +341,7 @@ async function createOrder(cart, account, shippingInfo={}){
   }
   setLocalProducts(products);
   const orders = getLocalOrders();
-  orders.unshift({ id:"ORD-" + Date.now(), customer:account, items:cart.map(i => ({ name:i.name, qty:Number(i.qty), price:Number(i.price), size:i.size || "M" })), subtotal:cartSubtotal(cart), shippingFee:Number(shippingInfo.fee || 0), shippingZone:shippingInfo.zone || "", total:totalAmount(cart, shippingInfo.fee), status:"Pending", createdAt:new Date().toISOString() });
+  orders.unshift({ id:"ORD-" + Date.now(), customer:account, items:cart.map(i => ({ name:i.name, qty:Number(i.qty), price:Number(i.price), productId:i.id, size:i.size || i.variant || "Default", image:i.image || "" })), subtotal:cartSubtotal(cart), shippingFee:Number(shippingInfo.fee || 0), shippingZone:shippingInfo.zone || "", total:totalAmount(cart, shippingInfo.fee), status:"Pending", createdAt:new Date().toISOString() });
   setLocalOrders(orders);
 }
 async function updateOrderStatus(orderId, newStatus, activeOrdersCache=[]){
@@ -362,6 +362,89 @@ async function moveOrderToHistory(orderId, activeOrdersCache=[]){
   const orders = getLocalOrders(); const idx = orders.findIndex(o => o.id === orderId); if(idx < 0) return;
   const history = getLocalHistory(); history.unshift({ ...orders[idx], status:orders[idx].status || "Removed", movedAt:new Date().toISOString() }); setLocalHistory(history); orders.splice(idx,1); setLocalOrders(orders);
 }
+async function cancelOrderAndRestoreStock(orderId, activeOrdersCache=[]){
+  if(!confirm("Cancel this order and return all items to inventory?")) return;
+  if(getMode()==="firebase" && firebaseReady){
+    const order = activeOrdersCache.find(x => x.id === orderId);
+    if(!order) throw new Error("Order not found");
+    if(["Paid", "Completed"].includes(order.status || "")){
+      if(!confirm("This order is already paid/completed. Continue and restore stock?")) return;
+    }
+    await runTransaction(db, async (transaction) => {
+      const items = Array.isArray(order.items) ? order.items : [];
+      const refsById = new Map();
+      for(const item of items){
+        const productId = item.productId || item.id;
+        if(productId && !refsById.has(productId)) refsById.set(productId, doc(db, "products", productId));
+      }
+      const snapsById = new Map();
+      for(const [id, ref] of refsById.entries()){
+        const snap = await transaction.get(ref);
+        if(snap.exists()) snapsById.set(id, snap);
+      }
+      const updatesById = new Map();
+      for(const item of items){
+        const productId = item.productId || item.id;
+        const snap = snapsById.get(productId);
+        if(!snap) continue;
+        const originalData = snap.data();
+        const draft = updatesById.get(productId) || {
+          ref: refsById.get(productId),
+          data: {
+            ...originalData,
+            variantStocks: (originalData.variantStocks && typeof originalData.variantStocks === "object") ? { ...originalData.variantStocks } : undefined,
+            stock: Number(originalData.stock || 0)
+          }
+        };
+        const qty = Number(item.qty || 1);
+        const selectedVariant = item.size || item.variant || "Default";
+        const variantStocks = (draft.data.variantStocks && typeof draft.data.variantStocks === "object") ? draft.data.variantStocks : {};
+        if(Object.keys(variantStocks).length && Object.prototype.hasOwnProperty.call(variantStocks, selectedVariant)){
+          variantStocks[selectedVariant] = Number(variantStocks[selectedVariant] || 0) + qty;
+          draft.data.variantStocks = variantStocks;
+          draft.data.stock = sumVariantStocks(variantStocks);
+        } else {
+          draft.data.stock = Number(draft.data.stock || 0) + qty;
+        }
+        updatesById.set(productId, draft);
+      }
+      for(const update of updatesById.values()){
+        const payload = { stock: Number(update.data.stock || 0) };
+        if(update.data.variantStocks && typeof update.data.variantStocks === "object") payload.variantStocks = update.data.variantStocks;
+        transaction.update(update.ref, payload);
+      }
+      transaction.set(doc(db, "order_history", orderId), { ...order, status:"Cancelled", cancelReason:"Customer changed mind / order cancelled", stockRestored:true, cancelledAt:serverTimestamp(), movedAt:serverTimestamp() });
+      transaction.delete(doc(db, "orders", orderId));
+    });
+    return;
+  }
+  const orders = getLocalOrders();
+  const idx = orders.findIndex(o => o.id === orderId);
+  if(idx < 0) throw new Error("Order not found");
+  const order = orders[idx];
+  const products = getLocalProducts();
+  for(const item of (order.items || [])){
+    const productId = item.productId || item.id;
+    const product = products.find(p => p.id === productId) || products.find(p => (p.name || "") === (item.name || ""));
+    if(!product) continue;
+    const qty = Number(item.qty || 1);
+    const selectedVariant = item.size || item.variant || "Default";
+    const map = variantStockMap(product);
+    if(selectedVariant && Object.prototype.hasOwnProperty.call(map, selectedVariant)){
+      product.variantStocks = { ...map, [selectedVariant]: Number(map[selectedVariant] || 0) + qty };
+      product.stock = sumVariantStocks(product.variantStocks);
+    } else {
+      product.stock = Number(product.stock || 0) + qty;
+    }
+  }
+  setLocalProducts(products);
+  const history = getLocalHistory();
+  history.unshift({ ...order, status:"Cancelled", cancelReason:"Customer changed mind / order cancelled", stockRestored:true, cancelledAt:new Date().toISOString(), movedAt:new Date().toISOString() });
+  orders.splice(idx, 1);
+  setLocalOrders(orders);
+  setLocalHistory(history);
+}
+
 function subscribeProducts(callback){
   if(getMode()==="firebase" && firebaseReady){
     return onSnapshot(query(collection(db, "products"), orderBy("createdAt", "desc")), (snapshot) => callback(snapshot.docs.map(d => ({ id:d.id, ...d.data() })), "firebase"), () => { seedLocalIfEmpty(); callback(getLocalProducts(), "local"); });
@@ -1341,10 +1424,11 @@ function initAdmin(){
     if(!tbody || !historyBody) return;
     if(!activeOrders.length) tbody.innerHTML = '<tr><td colspan="6" class="empty">No active orders yet.</td></tr>';
     else {
-      tbody.innerHTML = activeOrders.map(order => `<tr><td><div style="font-weight:800">${escapeHtml(order.receiptNo || order.id || "-")}</div><div class="small">${escapeHtml(order.id||"")}</div></td><td><div style="font-weight:800">${escapeHtml(order.customer?.name||"-")}</div><div class="small">${escapeHtml(order.customer?.phone||"")}</div></td><td>${money(order.total||0)}</td><td><select class="order-status-select" data-order-status="${escapeHtml(order.id||"")}"><option value="Pending" ${order.status==="Pending"?"selected":""}>Pending</option><option value="Preparing" ${order.status==="Preparing"?"selected":""}>Preparing</option><option value="Ready" ${order.status==="Ready"?"selected":""}>Ready</option><option value="Paid" ${order.status==="Paid"?"selected":""}>Paid</option><option value="Completed" ${order.status==="Completed"?"selected":""}>Completed</option></select></td><td>${(order.items||[]).map(i => `${escapeHtml(i.name)} x${Number(i.qty)}<br><span class="small">${escapeHtml(i.size || "")}</span>`).join("<br>")}</td><td><div class="row-actions"><button class="btn dark" data-pay-print="${escapeHtml(order.id||"")}">Paid + Print</button><button class="btn ghost" data-print-order="${escapeHtml(order.id||"")}">Reprint</button><button class="btn ghost" data-archive-order="${escapeHtml(order.id||"")}">Move to History</button></div></td></tr>`).join("");
+      tbody.innerHTML = activeOrders.map(order => `<tr><td><div style="font-weight:800">${escapeHtml(order.receiptNo || order.id || "-")}</div><div class="small">${escapeHtml(order.id||"")}</div></td><td><div style="font-weight:800">${escapeHtml(order.customer?.name||"-")}</div><div class="small">${escapeHtml(order.customer?.phone||"")}</div></td><td>${money(order.total||0)}</td><td><select class="order-status-select" data-order-status="${escapeHtml(order.id||"")}"><option value="Pending" ${order.status==="Pending"?"selected":""}>Pending</option><option value="Preparing" ${order.status==="Preparing"?"selected":""}>Preparing</option><option value="Ready" ${order.status==="Ready"?"selected":""}>Ready</option><option value="Paid" ${order.status==="Paid"?"selected":""}>Paid</option><option value="Completed" ${order.status==="Completed"?"selected":""}>Completed</option></select></td><td>${(order.items||[]).map(i => `${escapeHtml(i.name)} x${Number(i.qty)}<br><span class="small">${escapeHtml(i.size || "")}</span>`).join("<br>")}</td><td><div class="row-actions"><button class="btn dark" data-pay-print="${escapeHtml(order.id||"")}">Paid + Print</button><button class="btn ghost" data-print-order="${escapeHtml(order.id||"")}">Reprint</button><button class="btn danger" data-cancel-order="${escapeHtml(order.id||"")}">Cancel + Restore Stock</button><button class="btn ghost" data-archive-order="${escapeHtml(order.id||"")}">Move to History</button></div></td></tr>`).join("");
       tbody.querySelectorAll("[data-order-status]").forEach(select => select.onchange = async function(){ try { await updateOrderStatus(this.dataset.orderStatus, this.value, activeOrdersCache); showNotice(this.value==="Completed" ? "Order moved to history" : "Order status updated"); } catch { showNotice("Status update failed"); } });
       tbody.querySelectorAll("[data-pay-print]").forEach(btn => btn.onclick = async () => payAndPrintOrder(btn.dataset.payPrint));
       tbody.querySelectorAll("[data-print-order]").forEach(btn => btn.onclick = () => printReceipt(allOrdersForPrint.find(x => x.id === btn.dataset.printOrder)));
+      tbody.querySelectorAll("[data-cancel-order]").forEach(btn => btn.onclick = async () => { try { await cancelOrderAndRestoreStock(btn.dataset.cancelOrder, activeOrdersCache); showNotice("Order cancelled and stock restored"); } catch(error) { showNotice(error.message || "Cancel failed"); } });
       tbody.querySelectorAll("[data-archive-order]").forEach(btn => btn.onclick = async () => { try { await moveOrderToHistory(btn.dataset.archiveOrder, activeOrdersCache); showNotice("Order moved to history"); } catch { showNotice("Move failed"); } });
     }
     if(!historyOrders.length) historyBody.innerHTML = '<tr><td colspan="6" class="empty">No order history yet.</td></tr>';
