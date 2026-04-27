@@ -1257,3 +1257,109 @@ html,body{background:radial-gradient(circle at top,#182033 0,#05070c 45%,#030407
   bottom: 0;
   background: #020617;
 }
+/* === HERO PREMIUM BASE === */
+.ultra-hero-card {
+  position: relative;
+  overflow: hidden;
+  min-height: 460px;
+  border-radius: 18px;
+
+  background:
+    radial-gradient(circle at 80% 20%, rgba(168,85,247,.35), transparent 40%),
+    radial-gradient(circle at 70% 80%, rgba(34,211,238,.25), transparent 40%),
+    linear-gradient(135deg, #020617, #020617);
+
+  border: 1px solid rgba(34,211,238,.25);
+  box-shadow: 0 0 40px rgba(34,211,238,.12);
+}
+
+/* === TEXT === */
+.hero-title span {
+  background: linear-gradient(90deg, #22d3ee, #a855f7);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.highlight {
+  color: #22d3ee;
+  font-weight: 500;
+}
+
+/* === RIGHT SIDE VISUAL === */
+.hero-visual {
+  position: absolute;
+  right: 30px;
+  bottom: 20px;
+  width: 260px;
+  height: 260px;
+}
+
+/* === GLOW ORB === */
+.hero-glow {
+  position: absolute;
+  width: 260px;
+  height: 260px;
+  background: radial-gradient(circle, rgba(168,85,247,.6), transparent 70%);
+  filter: blur(60px);
+  animation: glowMove 6s ease-in-out infinite alternate;
+}
+
+/* === LOGO === */
+.hero-logo-premium {
+  position: absolute;
+  width: 160px;
+  height: 160px;
+  object-fit: contain;
+  border-radius: 50%;
+  top: 40px;
+  left: 50px;
+
+  filter:
+    drop-shadow(0 0 15px rgba(34,211,238,.7))
+    drop-shadow(0 0 30px rgba(168,85,247,.5));
+
+  animation: floatLogo 4s ease-in-out infinite;
+}
+
+/* === SMOKE EFFECT === */
+.hero-smoke {
+  position: absolute;
+  width: 220px;
+  height: 220px;
+  background: radial-gradient(circle, rgba(255,255,255,.08), transparent 70%);
+  filter: blur(25px);
+  animation: smokeMove 8s linear infinite;
+}
+
+/* === ANIMATIONS === */
+@keyframes floatLogo {
+  0%, 100% { transform: translateY(0px); }
+  50% { transform: translateY(-10px); }
+}
+
+@keyframes glowMove {
+  0% { transform: translate(0,0); }
+  100% { transform: translate(-20px, 20px); }
+}
+
+@keyframes smokeMove {
+  0% { transform: translateY(0) scale(1); opacity: .4; }
+  100% { transform: translateY(-40px) scale(1.2); opacity: 0; }
+}
+
+/* === MOBILE FIX === */
+@media (max-width: 520px) {
+  .hero-visual {
+    right: 10px;
+    bottom: 10px;
+    width: 180px;
+    height: 180px;
+  }
+
+  .hero-logo-premium {
+    width: 100px;
+    height: 100px;
+    top: 30px;
+    left: 40px;
+  }
+}
