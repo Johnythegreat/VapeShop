@@ -2,8 +2,69 @@ rules_version = '2';
 
 service cloud.firestore {
   match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return signedIn() && request.auth.token.email in [
+        "fchristian416@gmail.com"
+      ];
+    }
+
+    // Public catalog. Customers may only reduce/restore stock through frontend checkout/POS flow.
+    // Full product create/edit/delete remains admin-only.
+    match /products/{id} {
+      allow read: if true;
+      allow create, delete: if isAdmin();
+      allow update: if isAdmin()
+        || request.resource.data.diff(resource.data).affectedKeys().hasOnly(["stock", "variantStocks"]);
+    }
+
+    // Customer orders must be visible for the no-login tracking page.
+    // Admin updates statuses, moves to history, and deletes active orders.
+    match /orders/{id} {
+      allow create, read: if true;
+      allow update, delete: if isAdmin();
+    }
+
+    // Order history is readable for tracking and receipt reprint; admin writes only.
+    match /order_history/{id} {
+      allow read: if true;
+      allow create, update, delete: if isAdmin();
+    }
+
+    // Customer profile created from checkout/account form.
+    match /customers_public/{id} {
+      allow create, read, update: if true;
+      allow delete: if isAdmin();
+    }
+
+    // Shop chat needs public create/read/update so customers and admin can reply in the same thread.
+    match /messages/{id} {
+      allow create, read, update: if true;
+      allow delete: if isAdmin();
+    }
+
+    // Public site settings are readable; edits are admin-only.
+    match /settings/{id} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // Optional legacy collections used by older builds.
+    match /shippingZones/{id} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /sales/{id} {
+      allow create, read: if isAdmin();
+      allow update, delete: if isAdmin();
+    }
+
     match /{document=**} {
-      allow read, write: if true;
+      allow read, write: if false;
     }
   }
 }

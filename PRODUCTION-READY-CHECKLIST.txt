@@ -1,0 +1,31 @@
+MR VAPE SHOP - PRODUCTION READY CHECKLIST
+
+1) Firebase Authentication
+- Enable Email/Password login in Firebase Authentication.
+- Create the admin user: fchristian416@gmail.com
+- If you use another admin email, update ADMIN_EMAILS in firebase-config.js and firestore.rules.
+
+2) Firestore Rules
+- Open Firebase Console > Firestore Database > Rules.
+- Paste firestore.rules from this folder.
+- Publish.
+
+3) Hosting
+- Recommended: Netlify or Firebase Hosting.
+- Upload this full folder or ZIP contents.
+- Hard refresh after deploy: CTRL + SHIFT + R.
+
+4) Admin workflow
+- Login via admin-login.html.
+- Use Firebase Mode for live sync.
+- Add products with variants, image per variant, and stock per variant.
+- Orders can be Pending, Preparing, Ready, Paid, Completed, or Cancelled.
+- Paid + Print opens receipt printing.
+
+5) Customer workflow
+- Customer must pass 18+ gate.
+- Customer can browse products, select variants, checkout, message shop, and track orders.
+
+6) Security note
+- This is a frontend-only store/POS. The rules are safer than test rules, but public checkout still needs limited stock updates.
+- For maximum security later, move stock deduction/payment confirmation to Cloud Functions.
