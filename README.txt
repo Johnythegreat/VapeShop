@@ -29,3 +29,12 @@ PRO CHAT UPGRADE ADDED:
 - Added admin quick reply chips.
 - Added Enter-to-send and Shift+Enter new line support.
 - Fixed duplicate customer send click binding.
+
+
+
+FINAL BUILD NOTES
+- Added Mister Vape Shop logo as logo.png.
+- Updated hero promo to: BUY 10 ITEMS, GET 1 FREE T-SHIRT.
+- Updated promo cards to highlight free T-shirt promo.
+- Added premium logo glow and final dark vape UI polish.
+- Keep firebase-config.js and firestore.rules from this build.
