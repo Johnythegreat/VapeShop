@@ -255,7 +255,18 @@ function renderMessages(messages=[]){
   if(status) status.value = current.status || 'New';
   header.innerHTML = `<strong>${escapeHtml(current.name || 'Customer')}</strong><span>${escapeHtml(current.phone || '')}</span>`;
   const thread = Array.isArray(current.thread) && current.thread.length ? current.thread : [{ sender:'customer', text:current.message || current.latestMessage || '', image:current.image || '', at:current.createdAt || current.updatedAt }];
-  chat.innerHTML = thread.map(item => `<div class="admin-chat-bubble ${item.sender === 'admin' ? 'admin' : 'customer'}"><div>${renderChatMessageBody(item)}</div><small>${escapeHtml(messageTime(item.at))}</small></div>`).join('');
+  chat.innerHTML = thread.map(item => {
+    const isAdmin = item.sender === 'admin';
+    return `
+      <div class="admin-chat-row ${isAdmin ? 'admin' : 'customer'}">
+        <div class="admin-chat-bubble ${isAdmin ? 'admin' : 'customer'}">
+          <div class="bubble-label">${isAdmin ? 'You / Admin' : escapeHtml(current.name || 'Customer')}</div>
+          ${renderChatMessageBody(item)}
+          <small>${escapeHtml(messageTime(item.at))}</small>
+        </div>
+      </div>
+    `;
+  }).join('');
   chat.scrollTop = chat.scrollHeight;
 }
 async function sendAdminReply(){

@@ -1079,3 +1079,79 @@ html,body{background:radial-gradient(circle at top,#182033 0,#05070c 45%,#030407
 .orb{position:absolute;border-radius:50%;filter:blur(36px);opacity:.75;}.orb-cyan{right:0;bottom:0;width:210px;height:210px;background:rgba(34,211,238,.38);animation:orbMoveA 7s ease-in-out infinite alternate;}.orb-purple{right:85px;bottom:105px;width:170px;height:170px;background:rgba(168,85,247,.50);animation:orbMoveB 6s ease-in-out infinite alternate;}.device-shadow{position:absolute;right:72px;bottom:24px;width:125px;height:26px;border-radius:50%;background:rgba(0,0,0,.55);filter:blur(12px);}.smoke-layer{position:absolute;width:260px;height:260px;border-radius:50%;background:radial-gradient(circle,rgba(255,255,255,.10),transparent 70%);filter:blur(28px);pointer-events:none;opacity:.28;}.smoke-one{right:60px;bottom:40px;animation:smokeLift 9s linear infinite;}.smoke-two{right:140px;bottom:10px;animation:smokeLift 12s linear infinite reverse;opacity:.18;}.premium-btn{box-shadow:0 0 20px rgba(34,211,238,.18);}
 @keyframes heroSweep{0%,100%{transform:translateX(-12%);opacity:.35}50%{transform:translateX(12%);opacity:.75}}@keyframes floatLogo{0%,100%{transform:translateY(0) rotate(-2deg)}50%{transform:translateY(-13px) rotate(2deg)}}@keyframes orbMoveA{0%{transform:translate(0,0) scale(1)}100%{transform:translate(-24px,-18px) scale(1.08)}}@keyframes orbMoveB{0%{transform:translate(0,0) scale(.96)}100%{transform:translate(18px,28px) scale(1.1)}}@keyframes smokeLift{0%{transform:translateY(40px) scale(.85);opacity:0}20%{opacity:.22}100%{transform:translateY(-145px) scale(1.35);opacity:0}}
 @media (max-width:560px){.brand-logo{width:34px;height:34px}.brand-wrap{gap:7px}.brand-wrap .logo{font-size:18px;letter-spacing:3px}.next-hero-card{min-height:530px;align-items:flex-start}.hero-copy-wide{max-width:100%;padding:22px 18px 168px}.next-hero-title{font-size:32px!important}.next-hero-visual{right:8px;bottom:8px;width:190px;height:205px;opacity:.88}.logo-plate{right:24px;bottom:35px;width:118px;height:118px}.hero-logo-premium{width:105px;height:105px}.orb-cyan{width:150px;height:150px;right:0;bottom:0}.orb-purple{width:120px;height:120px;right:60px;bottom:76px}}
+
+/* === Admin Messenger Pro Alignment Fix === */
+.admin-chat-window{
+  display:flex !important;
+  flex-direction:column !important;
+  gap:12px !important;
+  max-height:520px !important;
+  overflow-y:auto !important;
+  padding:18px !important;
+}
+.admin-chat-row{
+  display:flex !important;
+  width:100% !important;
+}
+.admin-chat-row.customer{
+  justify-content:flex-start !important;
+}
+.admin-chat-row.admin{
+  justify-content:flex-end !important;
+}
+.admin-chat-bubble{
+  max-width:min(72%, 620px) !important;
+  padding:12px 14px !important;
+  border-radius:18px !important;
+  line-height:1.45 !important;
+  word-break:break-word !important;
+  white-space:normal !important;
+  box-shadow:0 12px 28px rgba(0,0,0,.28) !important;
+}
+.admin-chat-bubble.customer{
+  background:rgba(15,23,42,.95) !important;
+  color:#f8fbff !important;
+  border:1px solid rgba(34,211,238,.28) !important;
+  border-bottom-left-radius:6px !important;
+}
+.admin-chat-bubble.admin{
+  background:linear-gradient(135deg,#06b6d4,#7c3aed) !important;
+  color:#ffffff !important;
+  border:1px solid rgba(255,255,255,.18) !important;
+  border-bottom-right-radius:6px !important;
+}
+.admin-chat-bubble .bubble-label{
+  font-size:11px !important;
+  font-weight:900 !important;
+  letter-spacing:.2px !important;
+  opacity:.78 !important;
+  margin-bottom:6px !important;
+}
+.admin-chat-bubble small{
+  display:block !important;
+  font-size:10px !important;
+  opacity:.68 !important;
+  margin-top:7px !important;
+}
+.admin-chat-bubble .chat-image,
+.admin-chat-bubble img{
+  max-width:240px !important;
+  max-height:260px !important;
+  object-fit:cover !important;
+  border-radius:14px !important;
+  margin-top:8px !important;
+  border:1px solid rgba(255,255,255,.14) !important;
+}
+.admin-conversation-list{
+  max-height:620px !important;
+  overflow-y:auto !important;
+}
+.admin-compose{
+  position:sticky !important;
+  bottom:0 !important;
+  z-index:5 !important;
+  background:#070b12 !important;
+}
+@media (max-width:700px){
+  .admin-chat-bubble{max-width:88% !important;}
+}
