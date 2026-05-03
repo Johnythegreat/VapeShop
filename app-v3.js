@@ -646,9 +646,23 @@ function initShop(){
     });
   }
 
-  function firstProductImage(p){
+  function productOnlyImages(p){
     const imgs = Array.isArray(p?.images) ? p.images.map(x => String(x || "").trim()).filter(Boolean) : [];
-    return imgs[0] || String(p?.image || "").trim();
+    const variantImgs = [];
+    if(p?.variantImages && typeof p.variantImages === "object"){
+      Object.values(p.variantImages).forEach(img => { if(img) variantImgs.push(String(img).trim()); });
+    }
+    if(Array.isArray(p?.variantPhotoList)){
+      p.variantPhotoList.forEach(v => { if(v?.image) variantImgs.push(String(v.image).trim()); });
+    }
+    const variantSet = new Set(variantImgs.filter(Boolean));
+    return imgs.filter(img => !variantSet.has(img));
+  }
+
+  function firstProductImage(p){
+    const extraImgs = productOnlyImages(p);
+    const imgs = Array.isArray(p?.images) ? p.images.map(x => String(x || "").trim()).filter(Boolean) : [];
+    return extraImgs[0] || String(p?.image || "").trim() || imgs[0] || "";
   }
 
   function renderProducts(){
@@ -780,8 +794,8 @@ function initShop(){
       });
     }
     const variantGalleryImages = Object.values(variantImageMap).map(x => String(x || "").trim()).filter(Boolean);
-    const productImages = (Array.isArray(p.images) && p.images.length ? p.images : [firstProductImage(p)]).map(x => String(x || "").trim()).filter(Boolean);
-    const galleryImages = Array.from(new Set(variantGalleryImages.concat(productImages))).filter(Boolean);
+    const productImages = (productOnlyImages(p).length ? productOnlyImages(p) : [firstProductImage(p)]).map(x => String(x || "").trim()).filter(Boolean);
+    const galleryImages = Array.from(new Set(productImages.concat(variantGalleryImages))).filter(Boolean);
     $("productPageMainImage").src = galleryImages[0] || firstProductImage(p);
     $("productPageBadge").textContent = p.badge || "New";
     const productThumbs = $("productThumbs");
@@ -1713,8 +1727,8 @@ function initAdmin(){
       variantImages:(window.getVariantData ? window.getVariantData().variantImages : {}),
       variantStocks:(window.getVariantData ? window.getVariantData().variantStocks : {}),
       variantPhotoList:(window.getVariantData ? window.getVariantData().variantPhotoList : []),
-      image:(function(){ const vd = window.getVariantData ? window.getVariantData() : {variantPhotoList:[]}; const extra = window.getProductImageUrls ? window.getProductImageUrls() : [$("image").value.trim()]; return (vd.variantPhotoList[0]?.image || extra[0] || ""); })(),
-      images:(function(){ const vd = window.getVariantData ? window.getVariantData() : {variantPhotoList:[]}; const variantImgs = (vd.variantPhotoList || []).map(v => v.image).filter(Boolean); const extra = (window.getProductImageUrls ? window.getProductImageUrls() : [$("image").value.trim()]).filter(Boolean); return Array.from(new Set(variantImgs.concat(extra))); })()
+      image:(function(){ const extra = window.getProductImageUrls ? window.getProductImageUrls() : [$("image").value.trim()]; const cleanExtra = extra.map(x => String(x || "").trim()).filter(Boolean); const vd = window.getVariantData ? window.getVariantData() : {variantPhotoList:[]}; return (cleanExtra[0] || vd.variantPhotoList[0]?.image || ""); })(),
+      images:(function(){ const vd = window.getVariantData ? window.getVariantData() : {variantPhotoList:[]}; const variantImgs = (vd.variantPhotoList || []).map(v => v.image).filter(Boolean); const extra = (window.getProductImageUrls ? window.getProductImageUrls() : [$("image").value.trim()]).filter(Boolean); return Array.from(new Set(extra.concat(variantImgs))); })()
     }; try { await saveProduct(payload, docId || null); clearForm(); showNotice("Product saved"); } catch { showNotice("Save failed"); } };
   $("clearFormBtn").onclick = clearForm;
   $("seedBtn").onclick = async () => { try { await seedProducts(); showNotice("Demo products added"); } catch (error) { showNotice(error.message || "Seed failed"); } };
