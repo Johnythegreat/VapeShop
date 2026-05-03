@@ -353,61 +353,80 @@ function getLocalPromos(){
 function setLocalPromos(items){
   writeJSON(PROMOS_KEY, Array.isArray(items) ? items : []);
 }
+function upsertLocalPromo(clean, promoId){
+  const items = getLocalPromos();
+  const now = Date.now();
+  if(!promoId) promoId = "promo_" + now;
+  const idx = items.findIndex(x => x.id === promoId);
+  const row = { ...clean, id:promoId, updatedAt:now, localBackup:true };
+  if(idx >= 0) items[idx] = { ...items[idx], ...row };
+  else items.unshift({ ...row, createdAt:now });
+  setLocalPromos(items);
+  return promoId;
+}
+function normalizePromoDoc(promo){
+  return {
+    id:String(promo.id || "promo_" + Date.now()),
+    name:String(promo.name || "V2 Pod + V3 Battery Bundle"),
+    price:Number(promo.price || 750),
+    oldPrice:Number(promo.oldPrice || 830),
+    badge:String(promo.badge || "BEST DEAL"),
+    active:promo.active !== false,
+    items:Array.isArray(promo.items) && promo.items.length ? promo.items.map((item, idx) => ({
+      productId:String(item.productId || "").trim(),
+      productMatch:String(item.productMatch || (idx === 0 ? "v2pod" : "v3device")).trim(),
+      qty:Math.max(1, Number(item.qty || 1))
+    })) : [
+      { productId:"", productMatch:"v2pod", qty:1 },
+      { productId:"", productMatch:"v3device", qty:1 }
+    ]
+  };
+}
 async function fetchPromos(){
+  const localPromos = getLocalPromos().map(normalizePromoDoc);
+  let firebasePromos = [];
   try{
     if(getMode()==="firebase" && firebaseReady){
       const snap = await getDocs(collection(db, "promos"));
-      return snap.docs.map(d => ({ id:d.id, ...d.data() }));
+      firebasePromos = snap.docs.map(d => normalizePromoDoc({ id:d.id, ...d.data() }));
     }
   }catch(error){
     console.warn("Promo load failed, using local promos:", error);
   }
-  return getLocalPromos();
+  // Merge Firebase + local backup so admin and customer pages never show blank after a save fallback.
+  const merged = new Map();
+  [...firebasePromos, ...localPromos].forEach(p => merged.set(p.id, p));
+  return Array.from(merged.values());
 }
 async function savePromoItem(payload, promoId){
-  const clean = {
-    name:String(payload.name || "Bundle Promo").trim(),
-    price:Number(payload.price || 0),
-    oldPrice:Number(payload.oldPrice || 0),
-    badge:String(payload.badge || "BEST DEAL").trim(),
-    active:payload.active !== false,
-    items:Array.isArray(payload.items) ? payload.items.map(item => ({
-      productId:String(item.productId || "").trim(),
-      productMatch:String(item.productMatch || "").trim(),
-      qty:Math.max(1, Number(item.qty || 1))
-    })) : []
-  };
-  if(!clean.items.length){
-    clean.items = [
-      { productId:"", productMatch:"pod", qty:1 },
-      { productId:"", productMatch:"device", qty:1 }
-    ];
-  }
-  if(getMode()==="firebase" && firebaseReady){
-    if(promoId){
-      await updateDoc(doc(db, "promos", promoId), { ...clean, updatedAt:serverTimestamp() });
-      return promoId;
+  const clean = normalizePromoDoc({ ...payload, id:promoId || "" });
+  delete clean.id;
+  let savedId = promoId || "";
+  try{
+    if(getMode()==="firebase" && firebaseReady){
+      if(savedId && !savedId.startsWith("promo_")){
+        await updateDoc(doc(db, "promos", savedId), { ...clean, updatedAt:serverTimestamp() });
+      }else{
+        const ref = await addDoc(collection(db, "promos"), { ...clean, createdAt:serverTimestamp(), updatedAt:serverTimestamp() });
+        savedId = ref.id;
+      }
+      // also keep a local mirror so customer/admin stay visible immediately on GitHub Pages.
+      upsertLocalPromo(clean, savedId);
+      return savedId;
     }
-    const ref = await addDoc(collection(db, "promos"), { ...clean, createdAt:serverTimestamp(), updatedAt:serverTimestamp() });
-    return ref.id;
+  }catch(error){
+    console.warn("Firebase promo save failed. Saving promo locally instead:", error);
   }
-  const items = getLocalPromos();
-  if(promoId){
-    const idx = items.findIndex(x => x.id === promoId);
-    if(idx >= 0) items[idx] = { ...items[idx], ...clean, id:promoId, updatedAt:Date.now() };
-    else items.unshift({ ...clean, id:promoId, createdAt:Date.now(), updatedAt:Date.now() });
-  }else{
-    promoId = "promo_" + Date.now();
-    items.unshift({ ...clean, id:promoId, createdAt:Date.now(), updatedAt:Date.now() });
-  }
-  setLocalPromos(items);
-  return promoId;
+  return upsertLocalPromo(clean, savedId);
 }
 async function deletePromoItem(promoId){
   if(!promoId) return;
-  if(getMode()==="firebase" && firebaseReady){
-    await deleteDoc(doc(db, "promos", promoId));
-    return;
+  try{
+    if(getMode()==="firebase" && firebaseReady && !String(promoId).startsWith("promo_")){
+      await deleteDoc(doc(db, "promos", promoId));
+    }
+  }catch(error){
+    console.warn("Firebase promo delete failed. Removing local copy only:", error);
   }
   setLocalPromos(getLocalPromos().filter(x => x.id !== promoId));
 }
@@ -884,15 +903,21 @@ function initShop(){
     const wantedId = String(item?.productId || item?.docId || "").trim();
     const productIds = [product?.docId, product?.firestoreId, product?._docId, product?.id, product?.sku, product?.barcode].map(v => String(v || "").trim()).filter(Boolean);
 
-    // IMPORTANT: if admin selected a specific product, only match that exact product.
-    // Do not fallback to pod/device auto-detect, because combo products like "A1 Pod & Battery" match both words.
+    // If admin selected a specific product, match ONLY that exact product.
     if(wantedId) return productIds.includes(wantedId);
 
     const hay = ((product.name || "") + " " + (product.category || "") + " " + (product.brand || "")).toLowerCase();
     const category = String(product.category || "").toLowerCase();
     if(category === "promo") return false;
-    if(item.productMatch === "pod") return category === "pods" || /\bv2\b|\bpod\b|\bpods\b/.test(hay);
-    if(item.productMatch === "device") return category === "battery" || category === "devices" || /\bv3\b|\bdevice\b|\bbattery\b/.test(hay);
+
+    // Auto mode is strict to avoid A1 Pod & Battery being used for V2 + V3 bundles.
+    const match = String(item?.productMatch || "").toLowerCase();
+    if(match === "v2pod") return category === "pods" && /\bv2\b/.test(hay);
+    if(match === "v3device") return (category === "battery" || category === "devices") && /\bv3\b/.test(hay);
+
+    // Backward compatibility for old auto promos.
+    if(match === "pod") return category === "pods" && /\bv2\b/.test(hay);
+    if(match === "device") return (category === "battery" || category === "devices") && /\bv3\b/.test(hay);
     return false;
   }
 
@@ -2025,7 +2050,9 @@ function initAdmin(){
   function fillPromoProductSelects(){
     ["promoProduct1","promoProduct2"].forEach((id, idx) => {
       const el = $(id); if(!el) return;
-      el.innerHTML = '<option value="">Auto detect '+(idx===0?'Pod / V2':'Device / V3')+'</option>' + adminProductsCache.map(p => `<option value="${escapeHtml(productDocId(p))}">${escapeHtml(p.name)} (${escapeHtml(p.category || '')})</option>`).join("");
+      const autoValue = idx === 0 ? "__auto_v2pod" : "__auto_v3device";
+      const autoLabel = idx === 0 ? "Auto detect V2 Pod" : "Auto detect V3 Battery / Device";
+      el.innerHTML = `<option value="${autoValue}">${autoLabel}</option>` + adminProductsCache.map(p => `<option value="${escapeHtml(productDocId(p))}">${escapeHtml(p.name)} (${escapeHtml(p.category || '')})</option>`).join("");
     });
   }
   function clearPromoForm(){ editingPromoId=""; if($("promoForm")) $("promoForm").reset(); if($("promoActive")) $("promoActive").checked=true; fillPromoProductSelects(); }
@@ -2040,11 +2067,23 @@ function initAdmin(){
       return;
     }
     if(!adminPromosCache.length){ tbody.innerHTML = '<tr><td colspan="5" class="empty">No promos yet. Choose V2 and V3 above, then click Save Promo.</td></tr>'; return; }
-    tbody.innerHTML = adminPromosCache.map(p => `<tr><td><strong>${escapeHtml(p.name)}</strong><div class="small">${escapeHtml(p.badge || '')}</div></td><td>${money(p.price)}</td><td>${p.active ? 'ON' : 'OFF'}</td><td>${(p.items||[]).map(i => { const prod = adminProductsCache.find(x => productMatchesPromoItem(x, i)); return escapeHtml(prod ? (prod.name + ' (' + (prod.category || '') + ')') : (i.productId || i.productMatch || 'auto')); }).join(' + ')}</td><td><div class="row-actions"><button class="btn ghost" data-edit-promo="${escapeHtml(p.id)}">Edit</button><button class="btn danger" data-delete-promo="${escapeHtml(p.id)}">Delete</button></div></td></tr>`).join("");
+    const promoItemLabel = (i) => {
+      const prod = adminProductsCache.find(x => productMatchesPromoItem(x, i));
+      if(prod) return prod.name + ' (' + (prod.category || '') + ')';
+      const m = String(i.productMatch || '').toLowerCase();
+      if(m === 'v2pod' || m === 'pod') return 'Auto V2 Pod';
+      if(m === 'v3device' || m === 'device') return 'Auto V3 Battery / Device';
+      return i.productId || 'Auto item';
+    };
+    tbody.innerHTML = adminPromosCache.map(p => `<tr><td><strong>${escapeHtml(p.name)}</strong><div class="small">${escapeHtml(p.badge || '')}</div></td><td>${money(p.price)}</td><td>${p.active ? 'ON' : 'OFF'}</td><td>${(p.items||[]).map(i => escapeHtml(promoItemLabel(i))).join(' + ')}</td><td><div class="row-actions"><button class="btn ghost" data-edit-promo="${escapeHtml(p.id)}">Edit</button><button class="btn danger" data-delete-promo="${escapeHtml(p.id)}">Delete</button></div></td></tr>`).join("");
     tbody.querySelectorAll("[data-edit-promo]").forEach(btn => btn.onclick = () => {
       const p = adminPromosCache.find(x => x.id === btn.dataset.editPromo); if(!p) return; editingPromoId = p.id;
       $("promoName").value = p.name || ""; $("promoPrice").value = p.price || 0; $("promoOldPrice").value = p.oldPrice || 0; $("promoBadge").value = p.badge || ""; $("promoActive").checked = p.active !== false; fillPromoProductSelects();
-      const items = p.items || []; if($("promoProduct1")) $("promoProduct1").value = items[0]?.productId || ""; if($("promoProduct2")) $("promoProduct2").value = items[1]?.productId || ""; switchTab("promos");
+      const items = p.items || [];
+      const promoSelectValue = (item, fallback) => item?.productId || (String(item?.productMatch || '').toLowerCase().includes('v3') || fallback === 'v3' ? '__auto_v3device' : '__auto_v2pod');
+      if($("promoProduct1")) $("promoProduct1").value = promoSelectValue(items[0], 'v2');
+      if($("promoProduct2")) $("promoProduct2").value = promoSelectValue(items[1], 'v3');
+      switchTab("promos");
     });
     tbody.querySelectorAll("[data-delete-promo]").forEach(btn => btn.onclick = async () => { if(confirm("Delete this promo?")){ await deletePromoItem(btn.dataset.deletePromo); await loadAdminPromos(); showNotice("Promo deleted"); } });
   }
@@ -2146,10 +2185,21 @@ function initAdmin(){
   });
   if($("promoForm")) $("promoForm").onsubmit = async (e) => {
     e.preventDefault();
-    const p1 = $("promoProduct1")?.value || "";
-    const p2 = $("promoProduct2")?.value || "";
-    if(!p1 || !p2){ showNotice("Please select Item 1 and Item 2 before saving the promo."); return; }
-    const payload = { name:$("promoName").value, price:Number($("promoPrice").value), oldPrice:Number($("promoOldPrice").value || 0), badge:$("promoBadge").value || "BEST DEAL", active:$("promoActive").checked, items:[{ productId:p1, productMatch:"pod", qty:1 },{ productId:p2, productMatch:"device", qty:1 }] };
+    const p1Raw = $("promoProduct1")?.value || "__auto_v2pod";
+    const p2Raw = $("promoProduct2")?.value || "__auto_v3device";
+    const p1 = p1Raw.startsWith("__auto") ? "" : p1Raw;
+    const p2 = p2Raw.startsWith("__auto") ? "" : p2Raw;
+    const payload = {
+      name:$("promoName").value,
+      price:Number($("promoPrice").value),
+      oldPrice:Number($("promoOldPrice").value || 0),
+      badge:$("promoBadge").value || "BEST DEAL",
+      active:$("promoActive").checked,
+      items:[
+        { productId:p1, productMatch:p1 ? "custom" : "v2pod", qty:1 },
+        { productId:p2, productMatch:p2 ? "custom" : "v3device", qty:1 }
+      ]
+    };
     try{
       await savePromoItem(payload, editingPromoId);
       clearPromoForm();
