@@ -1628,21 +1628,64 @@ function initShop(){
     $("openInboxBtn").onclick = () => openInquiry();
     $("openInboxBtn").addEventListener("click", () => openInquiry());
   }
-  $("openCartBtn").onclick = () => openDrawer("cart");
-  $("navCart").onclick = () => openDrawer("cart");
-  $("navAccount").onclick = () => openDrawer("account");
+  function setBottomNavActive(activeId){
+    document.querySelectorAll(".bottom-nav .nav-btn").forEach(btn => btn.classList.toggle("active", btn.id === activeId));
+  }
+
+  function goCustomerTab(tab){
+    closeDrawer();
+    if(tab === "shop"){
+      currentCategory = "All";
+      if(searchInput) searchInput.value = "";
+      renderCategories();
+      renderProducts();
+      setBottomNavActive("navHome");
+      window.scrollTo({top:0, behavior:"smooth"});
+      return;
+    }
+    if(tab === "category"){
+      currentCategory = "All";
+      renderCategories();
+      renderProducts();
+      setBottomNavActive("navCategory");
+      const section = $("productsSection");
+      if(section) section.scrollIntoView({behavior:"smooth", block:"start"});
+      return;
+    }
+    if(tab === "promos"){
+      currentCategory = "Promo";
+      if(searchInput) searchInput.value = "";
+      renderCategories();
+      renderProducts();
+      setBottomNavActive("navPromos");
+      const section = $("productsSection");
+      if(section) section.scrollIntoView({behavior:"smooth", block:"start"});
+      showNotice("Showing promo deals");
+      return;
+    }
+    if(tab === "cart"){
+      setBottomNavActive("navCart");
+      openDrawer("cart");
+      return;
+    }
+    if(tab === "account"){
+      setBottomNavActive("navAccount");
+      openDrawer("account");
+    }
+  }
+
+  if($("openCartBtn")) $("openCartBtn").onclick = () => goCustomerTab("cart");
+  if($("navCart")) $("navCart").onclick = () => goCustomerTab("cart");
+  if($("navAccount")) $("navAccount").onclick = () => goCustomerTab("account");
+  if($("navCategory")) $("navCategory").onclick = () => goCustomerTab("category");
+  if($("navPromos")) $("navPromos").onclick = () => goCustomerTab("promos");
+  if($("navHome")) $("navHome").onclick = () => goCustomerTab("shop");
   if($("navTrack")) $("navTrack").onclick = () => openTrackingModal(account.phone || "");
   if($("openTrackTopBtn")) $("openTrackTopBtn").onclick = () => openTrackingModal(account.phone || "");
   if($("closeTrackingBtn")) $("closeTrackingBtn").onclick = closeTrackingModal;
   if($("trackingSearchBtn")) $("trackingSearchBtn").onclick = trackOrder;
   if($("trackingInput")) $("trackingInput").addEventListener("keydown", (e) => { if(e.key === "Enter") trackOrder(); });
   if($("trackingModal")) $("trackingModal").onclick = (e) => { if(e.target.id === "trackingModal") closeTrackingModal(); };
-  function setBottomNavActive(activeId){
-    document.querySelectorAll(".bottom-nav .nav-btn").forEach(btn => btn.classList.toggle("active", btn.id === activeId));
-  }
-  $("navCategory").onclick = () => { currentCategory = "All"; renderCategories(); renderProducts(); setBottomNavActive("navCategory"); $("productsSection").scrollIntoView({behavior:"smooth"}); };
-  if($("navPromos")) $("navPromos").onclick = () => { currentCategory = "Promo"; renderCategories(); renderProducts(); setBottomNavActive("navPromos"); $("productsSection").scrollIntoView({behavior:"smooth"}); showNotice("Showing promo deals"); };
-  $("navHome").onclick = () => { currentCategory = "All"; renderCategories(); renderProducts(); setBottomNavActive("navHome"); window.scrollTo({top:0, behavior:"smooth"}); };
   $("closeDrawerBtn").onclick = closeDrawer;
   drawer.onclick = (e) => { if(e.target.id==="drawer") closeDrawer(); };
 
