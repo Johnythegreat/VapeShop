@@ -2030,10 +2030,17 @@ function initAdmin(){
   }
   function clearPromoForm(){ editingPromoId=""; if($("promoForm")) $("promoForm").reset(); if($("promoActive")) $("promoActive").checked=true; fillPromoProductSelects(); }
   async function loadAdminPromos(){
-    adminPromosCache = await fetchPromos();
+    fillPromoProductSelects();
     const tbody = $("adminPromoTable"); if(!tbody) return;
-    if(!adminPromosCache.length){ tbody.innerHTML = '<tr><td colspan="5" class="empty">No promos yet.</td></tr>'; return; }
-    tbody.innerHTML = adminPromosCache.map(p => `<tr><td><strong>${escapeHtml(p.name)}</strong><div class="small">${escapeHtml(p.badge || '')}</div></td><td>${money(p.price)}</td><td>${p.active ? 'ON' : 'OFF'}</td><td>${(p.items||[]).map(i => { const prod = adminProductsCache.find(x => productMatchesPromoItem(x, i)); return escapeHtml(prod ? prod.name : (i.productId || i.productMatch || 'auto')); }).join(' + ')}</td><td><div class="row-actions"><button class="btn ghost" data-edit-promo="${escapeHtml(p.id)}">Edit</button><button class="btn danger" data-delete-promo="${escapeHtml(p.id)}">Delete</button></div></td></tr>`).join("");
+    try{
+      adminPromosCache = await fetchPromos();
+    }catch(error){
+      console.error("Admin promo load failed:", error);
+      tbody.innerHTML = '<tr><td colspan="5" class="empty">Promo load failed. Check Firestore rules or refresh.</td></tr>';
+      return;
+    }
+    if(!adminPromosCache.length){ tbody.innerHTML = '<tr><td colspan="5" class="empty">No promos yet. Choose V2 and V3 above, then click Save Promo.</td></tr>'; return; }
+    tbody.innerHTML = adminPromosCache.map(p => `<tr><td><strong>${escapeHtml(p.name)}</strong><div class="small">${escapeHtml(p.badge || '')}</div></td><td>${money(p.price)}</td><td>${p.active ? 'ON' : 'OFF'}</td><td>${(p.items||[]).map(i => { const prod = adminProductsCache.find(x => productMatchesPromoItem(x, i)); return escapeHtml(prod ? (prod.name + ' (' + (prod.category || '') + ')') : (i.productId || i.productMatch || 'auto')); }).join(' + ')}</td><td><div class="row-actions"><button class="btn ghost" data-edit-promo="${escapeHtml(p.id)}">Edit</button><button class="btn danger" data-delete-promo="${escapeHtml(p.id)}">Delete</button></div></td></tr>`).join("");
     tbody.querySelectorAll("[data-edit-promo]").forEach(btn => btn.onclick = () => {
       const p = adminPromosCache.find(x => x.id === btn.dataset.editPromo); if(!p) return; editingPromoId = p.id;
       $("promoName").value = p.name || ""; $("promoPrice").value = p.price || 0; $("promoOldPrice").value = p.oldPrice || 0; $("promoBadge").value = p.badge || ""; $("promoActive").checked = p.active !== false; fillPromoProductSelects();
@@ -2117,7 +2124,13 @@ function initAdmin(){
     }
   });
 
-  subscribeProducts((items, source) => { adminProductsCache = items; renderProductsAdmin(items, source); renderPosSearch($("posScanInput")?.value || ""); });
+  subscribeProducts((items, source) => {
+    adminProductsCache = items || [];
+    renderProductsAdmin(adminProductsCache, source);
+    renderPosSearch($("posScanInput")?.value || "");
+    fillPromoProductSelects();
+    if($("tab-promos") && !$("tab-promos").classList.contains("hidden")) loadAdminPromos();
+  });
   subscribeOrders((activeOrders, historyOrders) => renderOrders(activeOrders, historyOrders));
   subscribeCustomers((customers) => renderCustomers(customers));
   let __lastAdminMessageCount = 0;
@@ -2127,8 +2140,26 @@ function initAdmin(){
     __lastAdminMessageCount = messages.length;
     renderMessages(messages);
   });
-  document.querySelectorAll(".admin-tab-btn").forEach(btn => btn.onclick = () => { switchTab(btn.dataset.tab); if(btn.dataset.tab === "promos") loadAdminPromos(); });
-  if($("promoForm")) $("promoForm").onsubmit = async (e) => { e.preventDefault(); const payload = { name:$("promoName").value, price:Number($("promoPrice").value), oldPrice:Number($("promoOldPrice").value || 0), badge:$("promoBadge").value || "BEST DEAL", active:$("promoActive").checked, items:[{ productId:$("promoProduct1").value, productMatch:"pod", qty:1 },{ productId:$("promoProduct2").value, productMatch:"device", qty:1 }] }; await savePromoItem(payload, editingPromoId); clearPromoForm(); await loadAdminPromos(); showNotice("Promo saved"); };
+  document.querySelectorAll(".admin-tab-btn").forEach(btn => btn.onclick = () => {
+    switchTab(btn.dataset.tab);
+    if(btn.dataset.tab === "promos"){ fillPromoProductSelects(); loadAdminPromos(); }
+  });
+  if($("promoForm")) $("promoForm").onsubmit = async (e) => {
+    e.preventDefault();
+    const p1 = $("promoProduct1")?.value || "";
+    const p2 = $("promoProduct2")?.value || "";
+    if(!p1 || !p2){ showNotice("Please select Item 1 and Item 2 before saving the promo."); return; }
+    const payload = { name:$("promoName").value, price:Number($("promoPrice").value), oldPrice:Number($("promoOldPrice").value || 0), badge:$("promoBadge").value || "BEST DEAL", active:$("promoActive").checked, items:[{ productId:p1, productMatch:"pod", qty:1 },{ productId:p2, productMatch:"device", qty:1 }] };
+    try{
+      await savePromoItem(payload, editingPromoId);
+      clearPromoForm();
+      await loadAdminPromos();
+      showNotice("Promo saved and synced to customer Promos tab");
+    }catch(error){
+      console.error("Promo save failed:", error);
+      showNotice(error?.message || "Promo save failed. Check Firestore rules.");
+    }
+  };
   if($("clearPromoBtn")) $("clearPromoBtn").onclick = clearPromoForm;
   setupBarcodePos();
   setupShippingAdmin();

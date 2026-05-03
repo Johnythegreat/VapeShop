@@ -1,0 +1,1 @@
+Fixed admin promo display/select sync. Product dropdowns now populate after Firestore products load. Promo list reloads when opening Promos tab. Save validates selected products and syncs to customer Promos tab.
