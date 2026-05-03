@@ -117,6 +117,25 @@ const getVariantStock = (p, variant) => {
   return Number(p?.stock || 0);
 };
 const sumVariantStocks = (map) => Object.values(map || {}).reduce((sum, value) => sum + Number(value || 0), 0);
+
+const isBundleCartItem = (item) => item && item.type === "bundle" && Array.isArray(item.bundleItems);
+const bundleKey = (item) => isBundleCartItem(item) ? (item.bundleId || item.id || "bundle") + "::" + item.bundleItems.map(x => (x.productId || x.id) + "=" + (x.size || x.variant || "Default")).join("|") : "";
+const findExistingCartItem = (items, target) => isBundleCartItem(target)
+  ? items.find(x => isBundleCartItem(x) && bundleKey(x) === bundleKey(target))
+  : items.find(x => !isBundleCartItem(x) && x.id === target.id && x.size === target.size);
+const forEachStockComponent = (item, callback) => {
+  if(isBundleCartItem(item)){
+    item.bundleItems.forEach(component => callback({
+      productId: component.productId || component.id,
+      size: component.size || component.variant || "Default",
+      qty: Number(item.qty || 1) * Number(component.qty || 1),
+      label: component.name || item.name || "Bundle item"
+    }));
+  } else {
+    callback({ productId:item.id || item.productId, size:item.size || item.variant || "Default", qty:Number(item.qty || 1), label:item.name || "Product" });
+  }
+};
+const getProductVariants = (p, fallback=[]) => Array.isArray(p?.variants) && p.variants.length ? p.variants.filter(Boolean) : fallback;
 const escapeHtml = (v) => String(v ?? "").replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;").replaceAll('"',"&quot;");
 function showNotice(text){ const el = $("notice"); if(!el) return; el.textContent = text; el.style.display = "block"; clearTimeout(window.__vapeNoticeTimer); window.__vapeNoticeTimer = setTimeout(() => el.style.display = "none", 2000); }
 function formatChatTime(value){ return escapeHtml(String(value || "").replace("T"," ").slice(0,16)); }
@@ -354,57 +373,87 @@ async function saveCustomerProfile(account){
 async function createOrder(cart, account, shippingInfo={}){
   if(getMode()==="firebase" && firebaseReady){
     await runTransaction(db, async (transaction) => {
-      // Firestore transactions require all reads before any writes.
-      const productReads = [];
+      // Firestore transactions require all reads before writes.
+      const componentRows = [];
       for(const item of cart){
-        const ref = doc(db, "products", item.id);
-        const snap = await transaction.get(ref);
-        productReads.push({ item, ref, snap });
+        forEachStockComponent(item, component => {
+          if(!component.productId) throw new Error("Missing bundle product ID");
+          componentRows.push({ item, component, ref:doc(db, "products", component.productId) });
+        });
       }
 
-      const liveItems = [];
-      const productUpdates = [];
-      for(const row of productReads){
-        const { item, ref, snap } = row;
-        if(!snap.exists()) throw new Error(item.name + " not found");
+      const snapshots = [];
+      for(const row of componentRows){
+        const snap = await transaction.get(row.ref);
+        snapshots.push({ ...row, snap });
+      }
+
+      const updateMap = new Map();
+      for(const row of snapshots){
+        const { item, component, ref, snap } = row;
+        if(!snap.exists()) throw new Error(component.label + " not found");
         const data = snap.data();
-        const qty = Number(item.qty || 0);
-        const selectedVariant = item.size || item.variant || "Default";
-        const variantStocks = (data.variantStocks && typeof data.variantStocks === "object") ? { ...data.variantStocks } : {};
-        if(Object.keys(variantStocks).length && Object.prototype.hasOwnProperty.call(variantStocks, selectedVariant)){
-          const vStock = Number(variantStocks[selectedVariant] || 0);
-          if(vStock < qty) throw new Error("Not enough stock for " + item.name + " - " + selectedVariant);
-          variantStocks[selectedVariant] = vStock - qty;
-          productUpdates.push({ ref, payload:{ variantStocks, stock: sumVariantStocks(variantStocks) } });
-        } else {
-          const stock = Number(data.stock || 0);
-          if(stock < qty) throw new Error("Not enough stock for " + item.name);
-          productUpdates.push({ ref, payload:{ stock: stock - qty } });
+        const selectedVariant = component.size || "Default";
+        const qty = Number(component.qty || 0);
+        const key = ref.path;
+        let state = updateMap.get(key);
+        if(!state){
+          state = { ref, data, variantStocks:(data.variantStocks && typeof data.variantStocks === "object") ? { ...data.variantStocks } : null, stock:Number(data.stock || 0) };
+          updateMap.set(key, state);
         }
-        liveItems.push({ name:data.name, qty, price:Number(data.price), productId:item.id, size:selectedVariant, image:item.image || "" });
+        if(state.variantStocks && Object.prototype.hasOwnProperty.call(state.variantStocks, selectedVariant)){
+          const vStock = Number(state.variantStocks[selectedVariant] || 0);
+          if(vStock < qty) throw new Error("Not enough stock for " + (item.name || component.label) + " - " + selectedVariant);
+          state.variantStocks[selectedVariant] = vStock - qty;
+        } else {
+          if(state.stock < qty) throw new Error("Not enough stock for " + (item.name || component.label));
+          state.stock -= qty;
+        }
       }
 
-      productUpdates.forEach(u => transaction.update(u.ref, u.payload));
+      updateMap.forEach(state => {
+        if(state.variantStocks) transaction.update(state.ref, { variantStocks:state.variantStocks, stock:sumVariantStocks(state.variantStocks) });
+        else transaction.update(state.ref, { stock:state.stock });
+      });
+
+      const liveItems = cart.map(item => {
+        if(isBundleCartItem(item)) return {
+          type:"bundle", bundleId:item.bundleId || item.id || "v2-v3-bundle", name:item.name, qty:Number(item.qty || 1), price:Number(item.price || 0), image:item.image || "",
+          bundleItems:(item.bundleItems || []).map(c => ({ productId:c.productId || c.id, name:c.name, brand:c.brand || "", category:c.category || "", size:c.size || c.variant || "Default", qty:Number(c.qty || 1), image:c.image || "" })),
+          size:(item.bundleItems || []).map(c => c.size || c.variant || "Default").join(" + ")
+        };
+        return { name:item.name, qty:Number(item.qty || 1), price:Number(item.price), productId:item.id, size:item.size || item.variant || "Default", image:item.image || "" };
+      });
+
       const orderRef = doc(collection(db, "orders"));
       transaction.set(orderRef, { customer:account, items:liveItems, subtotal:cartSubtotal(liveItems), shippingFee:Number(shippingInfo.fee || 0), shippingZone:shippingInfo.zone || "", total:totalAmount(liveItems, shippingInfo.fee), status:"Pending", createdAt:serverTimestamp() });
     });
     return;
   }
+
   const products = getLocalProducts();
-  for(const item of cart){ const p = products.find(x => x.id === item.id); if(!p || getVariantStock(p, item.size) < Number(item.qty)) throw new Error("Not enough stock for " + item.name + (item.size ? " - " + item.size : "")); }
   for(const item of cart){
-    const p = products.find(x => x.id === item.id);
-    const map = variantStockMap(p);
-    if(item.size && Object.prototype.hasOwnProperty.call(map, item.size)){
-      p.variantStocks = { ...map, [item.size]: Number(map[item.size] || 0) - Number(item.qty) };
-      p.stock = sumVariantStocks(p.variantStocks);
-    } else {
-      p.stock = Number(p.stock) - Number(item.qty);
-    }
+    forEachStockComponent(item, component => {
+      const p = products.find(x => x.id === component.productId);
+      if(!p || getVariantStock(p, component.size) < Number(component.qty)) throw new Error("Not enough stock for " + (item.name || component.label) + (component.size ? " - " + component.size : ""));
+    });
+  }
+  for(const item of cart){
+    forEachStockComponent(item, component => {
+      const p = products.find(x => x.id === component.productId);
+      const map = variantStockMap(p);
+      if(component.size && Object.prototype.hasOwnProperty.call(map, component.size)){
+        p.variantStocks = { ...map, [component.size]: Number(map[component.size] || 0) - Number(component.qty) };
+        p.stock = sumVariantStocks(p.variantStocks);
+      } else {
+        p.stock = Number(p.stock) - Number(component.qty);
+      }
+    });
   }
   setLocalProducts(products);
+  const liveItems = cart.map(i => isBundleCartItem(i) ? ({ ...i, qty:Number(i.qty || 1), size:(i.bundleItems || []).map(c => c.size || c.variant || "Default").join(" + ") }) : ({ name:i.name, qty:Number(i.qty), price:Number(i.price), productId:i.id, size:i.size || "Default", image:i.image || "" }));
   const orders = getLocalOrders();
-  orders.unshift({ id:"ORD-" + Date.now(), customer:account, items:cart.map(i => ({ name:i.name, qty:Number(i.qty), price:Number(i.price), size:i.size || "M" })), subtotal:cartSubtotal(cart), shippingFee:Number(shippingInfo.fee || 0), shippingZone:shippingInfo.zone || "", total:totalAmount(cart, shippingInfo.fee), status:"Pending", createdAt:new Date().toISOString() });
+  orders.unshift({ id:"ORD-" + Date.now(), customer:account, items:liveItems, subtotal:cartSubtotal(liveItems), shippingFee:Number(shippingInfo.fee || 0), shippingZone:shippingInfo.zone || "", total:totalAmount(liveItems, shippingInfo.fee), status:"Pending", createdAt:new Date().toISOString() });
   setLocalOrders(orders);
 }
 async function updateOrderStatus(orderId, newStatus, activeOrdersCache=[]){
@@ -433,19 +482,20 @@ async function cancelAndRestoreOrder(orderId, activeOrdersCache=[]){
     await runTransaction(db, async (transaction) => {
       const reads = [];
       for(const item of (order.items || [])){
-        const productId = item.productId || item.id;
-        if(!productId) continue;
-        const ref = doc(db, "products", productId);
-        const snap = await transaction.get(ref);
-        reads.push({ item, ref, snap });
+        forEachStockComponent(item, component => {
+          if(!component.productId) return;
+          const ref = doc(db, "products", component.productId);
+          reads.push({ item, component, ref });
+        });
       }
+      for(const row of reads){ row.snap = await transaction.get(row.ref); }
       const orderRef = doc(db, "orders", orderId);
       const histRef = doc(db, "order_history", orderId);
       for(const row of reads){
         if(!row.snap.exists()) continue;
         const data = row.snap.data();
-        const qty = Number(row.item.qty || 0);
-        const variant = row.item.size || row.item.variant || "Default";
+        const qty = Number(row.component?.qty || row.item.qty || 0);
+        const variant = row.component?.size || row.item.size || row.item.variant || "Default";
         const variantStocks = (data.variantStocks && typeof data.variantStocks === "object") ? { ...data.variantStocks } : {};
         if(variant && (Object.keys(variantStocks).length || Array.isArray(data.variants))){
           variantStocks[variant] = Number(variantStocks[variant] || 0) + qty;
@@ -459,14 +509,15 @@ async function cancelAndRestoreOrder(orderId, activeOrdersCache=[]){
   }
   const products = getLocalProducts();
   (order.items || []).forEach(item => {
-    const productId = item.productId || item.id;
-    const p = products.find(x => x.id === productId);
-    if(!p) return;
-    const qty = Number(item.qty || 0);
-    const variant = item.size || item.variant || "Default";
-    const map = variantStockMap(p);
-    if(variant && (Object.keys(map).length || Array.isArray(p.variants))){ p.variantStocks = { ...map, [variant]: Number(map[variant] || 0) + qty }; p.stock = sumVariantStocks(p.variantStocks); }
-    else p.stock = Number(p.stock || 0) + qty;
+    forEachStockComponent(item, component => {
+      const p = products.find(x => x.id === component.productId);
+      if(!p) return;
+      const qty = Number(component.qty || 0);
+      const variant = component.size || "Default";
+      const map = variantStockMap(p);
+      if(variant && (Object.keys(map).length || Array.isArray(p.variants))){ p.variantStocks = { ...map, [variant]: Number(map[variant] || 0) + qty }; p.stock = sumVariantStocks(p.variantStocks); }
+      else p.stock = Number(p.stock || 0) + qty;
+    });
   });
   setLocalProducts(products);
   const orders = getLocalOrders();
@@ -753,6 +804,86 @@ function initShop(){
     if(ultraModal) ultraModal.onclick = (e) => { if(e.target === ultraModal) closeUltraGallery(); };
   }
 
+
+  function findBundleProducts(){
+    const pod = products.find(p => /v2/i.test(p.name || "") && /pod|pods/i.test((p.category || "") + " " + (p.name || ""))) || products.find(p => /pod|pods/i.test((p.category || "") + " " + (p.name || "")));
+    const device = products.find(p => /v3/i.test(p.name || "") && /device|battery/i.test((p.category || "") + " " + (p.name || ""))) || products.find(p => /device|battery/i.test((p.category || "") + " " + (p.name || "")));
+    return { pod, device };
+  }
+
+  function bundleVariantOptions(product, fallback){
+    return getProductVariants(product, fallback).map(v => {
+      const stock = getVariantStock(product, v);
+      return `<option value="${escapeHtml(v)}" ${stock <= 0 ? "disabled" : ""}>${escapeHtml(v)} ${stock <= 0 ? "(Out of stock)" : "(" + stock + " left)"}</option>`;
+    }).join("");
+  }
+
+  function renderBundlePromoSection(q=""){
+    if(currentCategory !== "All" && currentCategory !== "Promo") return "";
+    if(q && !"v2 v3 pod device bundle promo combo 750".includes(q)) return "";
+    const { pod, device } = findBundleProducts();
+    if(!pod || !device) return "";
+    const podImg = firstProductImage(pod);
+    const deviceImg = firstProductImage(device);
+    return `
+      <section class="bundle-section">
+        <div class="bundle-copy">
+          <span class="bundle-kicker">🔥 Bundle Deal</span>
+          <h3>V2 Pod + V3 Device</h3>
+          <p>Customer can pick 1 V2 flavor and 1 V3 battery color. Stock deducts from both selected variants.</p>
+          <div class="bundle-price"><strong>₱750</strong><span>Regular: ${money(Number(pod.price || 0) + Number(device.price || 0))}</span></div>
+        </div>
+        <div class="bundle-picker-card" data-bundle-promo>
+          <div class="bundle-images">
+            <div style="background-image:url('${escapeHtml(podImg)}')"></div>
+            <b>+</b>
+            <div style="background-image:url('${escapeHtml(deviceImg)}')"></div>
+          </div>
+          <label>Choose V2 Pod Flavor<select id="bundlePodVariant">${bundleVariantOptions(pod, ["Black Wave","Beer Sparkle","Trouble Purple","Very More","Very Baguio","Red Cannon","Bacteria Monster","Blue Freeze"])}</select></label>
+          <label>Choose V3 Battery Color<select id="bundleDeviceVariant">${bundleVariantOptions(device, ["Black","Gold","Purple","Blue"])}</select></label>
+          <button class="btn dark bundle-add-btn" id="addBundleBtn" type="button">Add Bundle ₱750</button>
+          <div class="small bundle-note">No fake promo stock. It checks and deducts the real V2 + V3 stocks.</div>
+        </div>
+      </section>`;
+  }
+
+  function bindBundlePromo(){
+    const btn = $("addBundleBtn");
+    if(!btn) return;
+    btn.onclick = () => {
+      const { pod, device } = findBundleProducts();
+      const podVariant = $("bundlePodVariant")?.value || "Default";
+      const deviceVariant = $("bundleDeviceVariant")?.value || "Default";
+      if(!pod || !device){ showNotice("Bundle products not found"); return; }
+      const podStock = getVariantStock(pod, podVariant);
+      const deviceStock = getVariantStock(device, deviceVariant);
+      if(podStock <= 0 || deviceStock <= 0){ showNotice("Selected bundle item is out of stock"); return; }
+      const item = {
+        type:"bundle",
+        bundleId:"v2-v3-750",
+        id:"bundle-v2-v3-750",
+        name:"V2 Pod + V3 Device Bundle",
+        brand:"MR VAPE SHOP",
+        category:"Promo",
+        price:750,
+        image:firstProductImage(pod) || firstProductImage(device),
+        qty:1,
+        size:podVariant + " + " + deviceVariant,
+        bundleItems:[
+          { productId:pod.id, name:pod.name, brand:pod.brand, category:pod.category, size:podVariant, qty:1, image:(pod.variantImages && pod.variantImages[podVariant]) ? pod.variantImages[podVariant] : firstProductImage(pod) },
+          { productId:device.id, name:device.name, brand:device.brand, category:device.category, size:deviceVariant, qty:1, image:(device.variantImages && device.variantImages[deviceVariant]) ? device.variantImages[deviceVariant] : firstProductImage(device) }
+        ]
+      };
+      const existing = findExistingCartItem(cart, item);
+      const nextQty = (existing ? Number(existing.qty || 0) : 0) + 1;
+      if(nextQty > podStock || nextQty > deviceStock){ showNotice("No more stock available for this bundle selection"); return; }
+      if(existing) existing.qty = nextQty; else cart.push(item);
+      writeJSON(CART_KEY, cart);
+      renderCart();
+      showNotice("Bundle added: " + podVariant + " + " + deviceVariant);
+    };
+  }
+
   function renderProducts(){
     const q = (searchInput.value || "").trim().toLowerCase();
     const filtered = products.filter(p => {
@@ -761,12 +892,13 @@ function initShop(){
       return categoryOk && (!q || text.includes(q));
     });
 
-    if(!filtered.length){
+    const bundleSection = renderBundlePromoSection(q);
+    if(!filtered.length && !bundleSection){
       gridEl.innerHTML = '<div style="grid-column:1/-1" class="empty">No products found.</div>';
       return;
     }
 
-    gridEl.innerHTML = filtered.map(p => {
+    gridEl.innerHTML = bundleSection + filtered.map(p => {
       const gallery = productGalleryImages(p);
       const cardImage = gallery[0] || firstProductImage(p);
       const safeImage = escapeHtml(cardImage);
@@ -802,6 +934,7 @@ function initShop(){
     }).join("");
 
     bindNoticeButtons();
+    bindBundlePromo();
 
     gridEl.querySelectorAll("[data-view]").forEach(card => {
       card.onclick = (e) => {
@@ -1004,6 +1137,35 @@ function initShop(){
     showNotice(`Added ${detailQty} item(s) - Variant ${selectedSize}`);
   }
 
+  function bundleStockAvailable(item, nextQty){
+    if(!isBundleCartItem(item)){
+      const live = products.find(x => x.id === item.id);
+      return live ? getVariantStock(live, item.size) >= nextQty : false;
+    }
+    return (item.bundleItems || []).every(component => {
+      const live = products.find(x => x.id === (component.productId || component.id));
+      return live && getVariantStock(live, component.size || component.variant || "Default") >= nextQty * Number(component.qty || 1);
+    });
+  }
+
+  function changeCartQtyByIndex(index, delta){
+    const item = cart[Number(index)];
+    if(!item) return;
+    const next = Number(item.qty || 1) + Number(delta);
+    if(next <= 0){ cart.splice(Number(index), 1); }
+    else if(!bundleStockAvailable(item, next)){ showNotice(isBundleCartItem(item) ? "No more stock available for this bundle" : "No more stock available for this variant"); return; }
+    else item.qty = next;
+    writeJSON(CART_KEY, cart);
+    renderCart();
+  }
+
+  function removeItemByIndex(index){
+    cart.splice(Number(index), 1);
+    writeJSON(CART_KEY, cart);
+    renderCart();
+    showNotice("Item removed");
+  }
+
   function changeCartQtyByKey(id, size, delta){
     const live = products.find(x => x.id === id);
     const cartItem = cart.find(x => x.id === id && x.size === size);
@@ -1052,21 +1214,22 @@ function initShop(){
     }
 
     cartView.innerHTML = `
-      ${cart.map(item => `
-        <div class="cart-item">
-          <div class="cart-thumb" style="background-image:url('${item.image}')"></div>
+      ${cart.map((item, idx) => `
+        <div class="cart-item ${isBundleCartItem(item) ? "cart-bundle-item" : ""}">
+          <div class="cart-thumb" style="background-image:url('${escapeHtml(item.image || "")}')"></div>
           <div>
             <div style="font-weight:800">${escapeHtml(item.name)}</div>
-            <div class="small">${escapeHtml(item.brand)} • ${escapeHtml(item.category)} • Variant: ${escapeHtml(item.size || "M")}</div>
+            <div class="small">${escapeHtml(item.brand || "MR VAPE SHOP")} • ${escapeHtml(item.category || "Promo")} • Variant: ${escapeHtml(item.size || "Default")}</div>
+            ${isBundleCartItem(item) ? `<div class="bundle-cart-breakdown">${(item.bundleItems || []).map(c => `<span>${escapeHtml(c.name || "Item")}: ${escapeHtml(c.size || c.variant || "Default")}</span>`).join("")}</div>` : ""}
             <div class="qty">
-              <button data-minus="${item.id}" data-size="${escapeHtml(item.size || "M")}">−</button>
+              <button data-minus-index="${idx}">−</button>
               <strong>${item.qty}</strong>
-              <button data-plus="${item.id}" data-size="${escapeHtml(item.size || "M")}">+</button>
+              <button data-plus-index="${idx}">+</button>
             </div>
           </div>
           <div style="text-align:right">
-            <div style="font-weight:900">${money(item.price * item.qty)}</div>
-            <button class="icon-btn" style="margin-top:8px" data-remove="${item.id}" data-size="${escapeHtml(item.size || "M")}">🗑️</button>
+            <div style="font-weight:900">${money(Number(item.price || 0) * Number(item.qty || 1))}</div>
+            <button class="icon-btn" style="margin-top:8px" data-remove-index="${idx}">🗑️</button>
           </div>
         </div>
       `).join("")}
@@ -1081,9 +1244,9 @@ function initShop(){
       </div>
     `;
 
-    cartView.querySelectorAll("[data-minus]").forEach(btn => btn.onclick = () => changeCartQtyByKey(btn.dataset.minus, btn.dataset.size, -1));
-    cartView.querySelectorAll("[data-plus]").forEach(btn => btn.onclick = () => changeCartQtyByKey(btn.dataset.plus, btn.dataset.size, 1));
-    cartView.querySelectorAll("[data-remove]").forEach(btn => btn.onclick = () => removeItem(btn.dataset.remove, btn.dataset.size));
+    cartView.querySelectorAll("[data-minus-index]").forEach(btn => btn.onclick = () => changeCartQtyByIndex(btn.dataset.minusIndex, -1));
+    cartView.querySelectorAll("[data-plus-index]").forEach(btn => btn.onclick = () => changeCartQtyByIndex(btn.dataset.plusIndex, 1));
+    cartView.querySelectorAll("[data-remove-index]").forEach(btn => btn.onclick = () => removeItemByIndex(btn.dataset.removeIndex));
     const zoneSelect = $("shippingZoneSelect");
     if(zoneSelect) zoneSelect.onchange = () => { selectedShippingZone = zoneSelect.value; writeJSON("vape_shop_selected_shipping_zone", selectedShippingZone); renderCart(); };
     $("checkoutBtn").onclick = checkout;
