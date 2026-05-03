@@ -1369,3 +1369,33 @@ html,body{background:radial-gradient(circle at top,#182033 0,#05070c 45%,#030407
   .bundle-images div{height:92px}
   .bundle-price strong{font-size:34px}
 }
+
+/* CART OVERLAY FIX 2026-05-03
+   Keep cart/account drawer above promo bundle cards and block background interaction. */
+.drawer{
+  z-index: 5000 !important;
+  pointer-events: none;
+}
+.drawer.show{
+  display: flex !important;
+  pointer-events: auto;
+}
+.drawer-panel{
+  position: relative;
+  z-index: 5001 !important;
+  background: rgba(10,15,26,.98) !important;
+  box-shadow: 0 -24px 90px rgba(0,0,0,.78), 0 0 0 1px rgba(125,249,255,.14) !important;
+}
+.drawer.show::before{
+  content:"";
+  position:absolute;
+  inset:0;
+  background: rgba(0,0,0,.72);
+  backdrop-filter: blur(10px);
+}
+body.drawer-open{ overflow:hidden; }
+body.drawer-open .bundle-section,
+body.drawer-open .promo-dynamic-card{
+  pointer-events:none !important;
+}
+body.drawer-open .bottom-nav{ z-index: 35 !important; }

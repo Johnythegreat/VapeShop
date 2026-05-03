@@ -1585,6 +1585,7 @@ function initShop(){
 
   function openDrawer(type){
     drawer.classList.add("show");
+    document.body.classList.add("drawer-open");
     cartView.classList.add("hidden");
     accountView.classList.add("hidden");
     if(type==="cart"){
@@ -1598,7 +1599,10 @@ function initShop(){
     }
   }
 
-  function closeDrawer(){ drawer.classList.remove("show"); }
+  function closeDrawer(){
+    drawer.classList.remove("show");
+    document.body.classList.remove("drawer-open");
+  }
 
 
   function findCustomerConversation(messages = liveConversations){
