@@ -341,6 +341,72 @@ async function sendAdminReply(){
 }
 function bindNoticeButtons(){ document.querySelectorAll(".js-notice").forEach(btn => btn.onclick = () => showNotice(btn.dataset.text || "Done")); }
 async function fetchFirebaseDocs(col, field=null){ const ref = collection(db, col); const q = field ? query(ref, orderBy(field, "desc")) : ref; const snap = await getDocs(q); return snap.docs.map(d => ({ id:d.id, ...d.data() })); }
+
+
+function getLocalPromos(){
+  return readJSON(PROMOS_KEY, []);
+}
+function setLocalPromos(items){
+  writeJSON(PROMOS_KEY, Array.isArray(items) ? items : []);
+}
+async function fetchPromos(){
+  try{
+    if(getMode()==="firebase" && firebaseReady){
+      const snap = await getDocs(collection(db, "promos"));
+      return snap.docs.map(d => ({ id:d.id, ...d.data() }));
+    }
+  }catch(error){
+    console.warn("Promo load failed, using local promos:", error);
+  }
+  return getLocalPromos();
+}
+async function savePromoItem(payload, promoId){
+  const clean = {
+    name:String(payload.name || "Bundle Promo").trim(),
+    price:Number(payload.price || 0),
+    oldPrice:Number(payload.oldPrice || 0),
+    badge:String(payload.badge || "BEST DEAL").trim(),
+    active:payload.active !== false,
+    items:Array.isArray(payload.items) ? payload.items.map(item => ({
+      productId:String(item.productId || "").trim(),
+      productMatch:String(item.productMatch || "").trim(),
+      qty:Math.max(1, Number(item.qty || 1))
+    })) : []
+  };
+  if(!clean.items.length){
+    clean.items = [
+      { productId:"", productMatch:"pod", qty:1 },
+      { productId:"", productMatch:"device", qty:1 }
+    ];
+  }
+  if(getMode()==="firebase" && firebaseReady){
+    if(promoId){
+      await updateDoc(doc(db, "promos", promoId), { ...clean, updatedAt:serverTimestamp() });
+      return promoId;
+    }
+    const ref = await addDoc(collection(db, "promos"), { ...clean, createdAt:serverTimestamp(), updatedAt:serverTimestamp() });
+    return ref.id;
+  }
+  const items = getLocalPromos();
+  if(promoId){
+    const idx = items.findIndex(x => x.id === promoId);
+    if(idx >= 0) items[idx] = { ...items[idx], ...clean, id:promoId, updatedAt:Date.now() };
+    else items.unshift({ ...clean, id:promoId, createdAt:Date.now(), updatedAt:Date.now() });
+  }else{
+    promoId = "promo_" + Date.now();
+    items.unshift({ ...clean, id:promoId, createdAt:Date.now(), updatedAt:Date.now() });
+  }
+  setLocalPromos(items);
+  return promoId;
+}
+async function deletePromoItem(promoId){
+  if(!promoId) return;
+  if(getMode()==="firebase" && firebaseReady){
+    await deleteDoc(doc(db, "promos", promoId));
+    return;
+  }
+  setLocalPromos(getLocalPromos().filter(x => x.id !== promoId));
+}
 function storageSync(callback){ const h = () => callback(); window.addEventListener("storage", h); return () => window.removeEventListener("storage", h); }
 async function saveProduct(payload, docId){
   if(getMode()==="firebase" && firebaseReady){
