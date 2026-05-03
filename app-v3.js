@@ -20,6 +20,27 @@ function productDocId(product){
   return String(product?.docId || product?.firestoreId || product?._docId || product?.id || "");
 }
 
+// GLOBAL promo matcher used by both customer page and admin page.
+// This fixes admin errors like: productMatchesPromoItem is not defined.
+function productMatchesPromoItem(product, item){
+  const wantedId = String(item?.productId || item?.docId || "").trim();
+  const productIds = [product?.docId, product?.firestoreId, product?._docId, product?.id, product?.sku, product?.barcode]
+    .map(v => String(v || "").trim()).filter(Boolean);
+  if(wantedId) return productIds.includes(wantedId);
+
+  const hay = ((product?.name || "") + " " + (product?.category || "") + " " + (product?.brand || "")).toLowerCase();
+  const category = String(product?.category || "").toLowerCase();
+  if(category === "promo") return false;
+
+  const match = String(item?.productMatch || "").toLowerCase();
+  if(match === "v2pod") return category === "pods" && /\bv2\b/.test(hay);
+  if(match === "v3device") return (category === "battery" || category === "devices") && /\bv3\b/.test(hay);
+  if(match === "pod") return category === "pods" && /\bv2\b/.test(hay);
+  if(match === "device") return (category === "battery" || category === "devices") && /\bv3\b/.test(hay);
+  if(match === "custom") return !!wantedId && productIds.includes(wantedId);
+  return false;
+}
+
 const demoProducts = [
   {
     name:"X-Black V2 Pod",
@@ -2055,7 +2076,14 @@ function initAdmin(){
       el.innerHTML = `<option value="${autoValue}">${autoLabel}</option>` + adminProductsCache.map(p => `<option value="${escapeHtml(productDocId(p))}">${escapeHtml(p.name)} (${escapeHtml(p.category || '')})</option>`).join("");
     });
   }
-  function clearPromoForm(){ editingPromoId=""; if($("promoForm")) $("promoForm").reset(); if($("promoActive")) $("promoActive").checked=true; fillPromoProductSelects(); }
+  function setPromoDefaultValues(){
+    if($("promoName") && !$("promoName").value) $("promoName").value = "V2 Pod + V3 Device Bundle";
+    if($("promoPrice") && !$("promoPrice").value) $("promoPrice").value = "750";
+    if($("promoOldPrice") && !$("promoOldPrice").value) $("promoOldPrice").value = "830";
+    if($("promoBadge") && !$("promoBadge").value) $("promoBadge").value = "BEST DEAL";
+    if($("promoActive")) $("promoActive").checked = true;
+  }
+  function clearPromoForm(){ editingPromoId=""; if($("promoForm")) $("promoForm").reset(); setPromoDefaultValues(); fillPromoProductSelects(); }
   async function loadAdminPromos(){
     fillPromoProductSelects();
     const tbody = $("adminPromoTable"); if(!tbody) return;
@@ -2190,11 +2218,11 @@ function initAdmin(){
     const p1 = p1Raw.startsWith("__auto") ? "" : p1Raw;
     const p2 = p2Raw.startsWith("__auto") ? "" : p2Raw;
     const payload = {
-      name:$("promoName").value,
-      price:Number($("promoPrice").value),
-      oldPrice:Number($("promoOldPrice").value || 0),
-      badge:$("promoBadge").value || "BEST DEAL",
-      active:$("promoActive").checked,
+      name:($("promoName")?.value || "V2 Pod + V3 Device Bundle").trim(),
+      price:Number($("promoPrice")?.value || 750),
+      oldPrice:Number($("promoOldPrice")?.value || 830),
+      badge:($("promoBadge")?.value || "BEST DEAL").trim(),
+      active:$("promoActive")?.checked !== false,
       items:[
         { productId:p1, productMatch:p1 ? "custom" : "v2pod", qty:1 },
         { productId:p2, productMatch:p2 ? "custom" : "v3device", qty:1 }
@@ -2210,6 +2238,7 @@ function initAdmin(){
       showNotice(error?.message || "Promo save failed. Check Firestore rules.");
     }
   };
+  setPromoDefaultValues();
   if($("clearPromoBtn")) $("clearPromoBtn").onclick = clearPromoForm;
   setupBarcodePos();
   setupShippingAdmin();
