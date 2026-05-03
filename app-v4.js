@@ -2193,10 +2193,58 @@ function initAdmin(){
     a.href = url; a.download = `mr-vape-sales-report-${month}.csv`; a.click();
     URL.revokeObjectURL(url);
   }
+
+  async function resetSalesData({ archive=true } = {}){
+    const ok = confirm(archive
+      ? "Archive all orders/history, then reset reports to 0? Inventory will NOT change."
+      : "PERMANENTLY delete all orders/history? Reports will reset to 0. Inventory will NOT change.");
+    if(!ok) return;
+    const stamp = new Date().toISOString();
+    try{
+      if(getMode()==="firebase" && firebaseReady){
+        for(const colName of ["orders", "order_history"]){
+          const snap = await getDocs(collection(db, colName));
+          const docs = snap.docs;
+          for(let i=0; i<docs.length; i+=450){
+            const batch = writeBatch(db);
+            docs.slice(i, i+450).forEach(d => {
+              if(archive){
+                const archiveRef = doc(collection(db, "archive_orders"));
+                batch.set(archiveRef, { ...d.data(), originalId:d.id, originalCollection:colName, archivedAt:stamp });
+              }
+              batch.delete(d.ref);
+            });
+            await batch.commit();
+          }
+        }
+      } else {
+        if(archive){
+          const previousArchive = readJSON("vape_shop_archive_orders", []);
+          const archived = [
+            ...getLocalOrders().map(o => ({ ...o, originalCollection:"orders", archivedAt:stamp })),
+            ...getLocalHistory().map(o => ({ ...o, originalCollection:"order_history", archivedAt:stamp }))
+          ];
+          writeJSON("vape_shop_archive_orders", [...archived, ...previousArchive]);
+        }
+        setLocalOrders([]);
+        setLocalHistory([]);
+      }
+      activeOrdersCache = [];
+      historyOrdersCache = [];
+      renderOrders(activeOrdersCache, historyOrdersCache);
+      renderMonthlyReport();
+      showNotice(archive ? "Sales archived and reset to 0" : "Sales history deleted and reset to 0");
+    }catch(error){
+      console.error("Reset sales failed", error);
+      showNotice(error.message || "Reset failed");
+    }
+  }
   function setupReportsAdmin(){
     if($("reportMonth") && !$("reportMonth").value) $("reportMonth").value = currentMonthValue();
     if($("generateReportBtn")) $("generateReportBtn").onclick = renderMonthlyReport;
     if($("exportReportBtn")) $("exportReportBtn").onclick = exportMonthlyReportCSV;
+    if($("archiveResetSalesBtn")) $("archiveResetSalesBtn").onclick = () => resetSalesData({ archive:true });
+    if($("hardResetSalesBtn")) $("hardResetSalesBtn").onclick = () => resetSalesData({ archive:false });
     if($("reportStatusFilter")) $("reportStatusFilter").onchange = renderMonthlyReport;
   }
 
