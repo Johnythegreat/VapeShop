@@ -11,6 +11,7 @@ const ORDERS_KEY = "vape_shop_orders";
 const HISTORY_KEY = "vape_shop_order_history";
 const SHIPPING_SETTINGS_KEY = "vape_shop_shipping_settings";
 const MESSAGES_KEY = "vape_shop_messages";
+const PROMOS_KEY = "vape_shop_promos";
 const CHAT_ID_KEY = "vape_shop_chat_id";
 const CUSTOMER_LAST_SEEN_KEY = "vape_shop_customer_last_seen";
 const MODE_KEY = "vape_shop_mode";
@@ -805,86 +806,80 @@ function initShop(){
   }
 
 
-  function findBundleProducts(){
-    const pod = products.find(p => /v2/i.test(p.name || "") && /pod|pods/i.test((p.category || "") + " " + (p.name || ""))) || products.find(p => /pod|pods/i.test((p.category || "") + " " + (p.name || "")));
-    const device = products.find(p => /v3/i.test(p.name || "") && /device|battery/i.test((p.category || "") + " " + (p.name || ""))) || products.find(p => /device|battery/i.test((p.category || "") + " " + (p.name || "")));
-    return { pod, device };
+  function productMatchesPromoItem(product, item){
+    if(item.productId && product.id === item.productId) return true;
+    const hay = ((product.name || "") + " " + (product.category || "") + " " + (product.brand || "")).toLowerCase();
+    if(item.productMatch === "pod") return /pod|pods|v2/.test(hay);
+    if(item.productMatch === "device") return /device|battery|v3/.test(hay);
+    return false;
   }
 
-  function bundleVariantOptions(product, fallback){
+  function resolvePromoProducts(promo){
+    return (promo.items || []).map(item => ({ item, product:products.find(p => productMatchesPromoItem(p, item)) })).filter(x => x.product);
+  }
+
+  function promoVariantOptions(product, fallback){
     return getProductVariants(product, fallback).map(v => {
       const stock = getVariantStock(product, v);
       return `<option value="${escapeHtml(v)}" ${stock <= 0 ? "disabled" : ""}>${escapeHtml(v)} ${stock <= 0 ? "(Out of stock)" : "(" + stock + " left)"}</option>`;
     }).join("");
   }
 
-  function renderBundlePromoSection(q=""){
+  async function renderBundlePromoSection(q=""){
     if(currentCategory !== "All" && currentCategory !== "Promo") return "";
-    if(q && !"v2 v3 pod device bundle promo combo 750".includes(q)) return "";
-    const { pod, device } = findBundleProducts();
-    if(!pod || !device) return "";
-    const podImg = firstProductImage(pod);
-    const deviceImg = firstProductImage(device);
-    return `
-      <section class="bundle-section">
-        <div class="bundle-copy">
-          <span class="bundle-kicker">🔥 Bundle Deal</span>
-          <h3>V2 Pod + V3 Device</h3>
-          <p>Customer can pick 1 V2 flavor and 1 V3 battery color. Stock deducts from both selected variants.</p>
-          <div class="bundle-price"><strong>₱750</strong><span>Regular: ${money(Number(pod.price || 0) + Number(device.price || 0))}</span></div>
-        </div>
-        <div class="bundle-picker-card" data-bundle-promo>
-          <div class="bundle-images">
-            <div style="background-image:url('${escapeHtml(podImg)}')"></div>
-            <b>+</b>
-            <div style="background-image:url('${escapeHtml(deviceImg)}')"></div>
-          </div>
-          <label>Choose V2 Pod Flavor<select id="bundlePodVariant">${bundleVariantOptions(pod, ["Black Wave","Beer Sparkle","Trouble Purple","Very More","Very Baguio","Red Cannon","Bacteria Monster","Blue Freeze"])}</select></label>
-          <label>Choose V3 Battery Color<select id="bundleDeviceVariant">${bundleVariantOptions(device, ["Black","Gold","Purple","Blue"])}</select></label>
-          <button class="btn dark bundle-add-btn" id="addBundleBtn" type="button">Add Bundle ₱750</button>
-          <div class="small bundle-note">No fake promo stock. It checks and deducts the real V2 + V3 stocks.</div>
-        </div>
+    const promos = (await fetchPromos()).filter(p => p.active);
+    if(!promos.length) return "";
+    const needle = String(q || "").toLowerCase();
+    const cards = promos.map(promo => {
+      if(needle && !(promo.name || "").toLowerCase().includes(needle) && !"bundle promo combo deal v2 v3 pod device".includes(needle)) return "";
+      const rows = resolvePromoProducts(promo);
+      if(rows.length < 2) return "";
+      const imgs = rows.map(r => firstProductImage(r.product)).filter(Boolean);
+      const regular = promo.oldPrice || rows.reduce((sum, r) => sum + Number(r.product.price || 0) * Number(r.item.qty || 1), 0);
+      const selectors = rows.map((r, idx) => {
+        const fall = /device|battery|v3/i.test((r.product.category||"") + " " + (r.product.name||"")) ? ["Black","Gold","Purple","Blue"] : ["Black Wave","Beer Sparkle","Trouble Purple","Very More","Very Baguio","Red Cannon","Bacteria Monster","Blue Freeze"];
+        return `<label>Choose ${escapeHtml(r.product.name)}<select data-promo-select="${escapeHtml(promo.id)}" data-index="${idx}">${promoVariantOptions(r.product, fall)}</select></label>`;
+      }).join("");
+      return `<section class="bundle-section promo-dynamic-card" data-promo-id="${escapeHtml(promo.id)}">
+        <div class="bundle-copy"><span class="bundle-kicker">🔥 ${escapeHtml(promo.badge || "Bundle Deal")}</span><h3>${escapeHtml(promo.name)}</h3><p>Customer picks each item. Stock is deducted from the real selected variants.</p><div class="bundle-price"><strong>${money(promo.price)}</strong><span>Regular: ${money(regular)}</span></div></div>
+        <div class="bundle-picker-card"><div class="bundle-images">${imgs.map((img,i)=>`${i?"<b>+</b>":""}<div style="background-image:url('${escapeHtml(img)}')"></div>`).join("")}</div>${selectors}<button class="btn dark bundle-add-btn" data-add-promo="${escapeHtml(promo.id)}" type="button">Add Bundle ${money(promo.price)}</button><div class="small bundle-note">Promo editable in admin. No fake promo stock.</div></div>
       </section>`;
+    }).join("");
+    return cards;
   }
 
-  function bindBundlePromo(){
-    const btn = $("addBundleBtn");
-    if(!btn) return;
-    btn.onclick = () => {
-      const { pod, device } = findBundleProducts();
-      const podVariant = $("bundlePodVariant")?.value || "Default";
-      const deviceVariant = $("bundleDeviceVariant")?.value || "Default";
-      if(!pod || !device){ showNotice("Bundle products not found"); return; }
-      const podStock = getVariantStock(pod, podVariant);
-      const deviceStock = getVariantStock(device, deviceVariant);
-      if(podStock <= 0 || deviceStock <= 0){ showNotice("Selected bundle item is out of stock"); return; }
-      const item = {
-        type:"bundle",
-        bundleId:"v2-v3-750",
-        id:"bundle-v2-v3-750",
-        name:"V2 Pod + V3 Device Bundle",
-        brand:"MR VAPE SHOP",
-        category:"Promo",
-        price:750,
-        image:firstProductImage(pod) || firstProductImage(device),
-        qty:1,
-        size:podVariant + " + " + deviceVariant,
-        bundleItems:[
-          { productId:pod.id, name:pod.name, brand:pod.brand, category:pod.category, size:podVariant, qty:1, image:(pod.variantImages && pod.variantImages[podVariant]) ? pod.variantImages[podVariant] : firstProductImage(pod) },
-          { productId:device.id, name:device.name, brand:device.brand, category:device.category, size:deviceVariant, qty:1, image:(device.variantImages && device.variantImages[deviceVariant]) ? device.variantImages[deviceVariant] : firstProductImage(device) }
-        ]
+  async function bindBundlePromo(){
+    const promos = await fetchPromos();
+    document.querySelectorAll("[data-add-promo]").forEach(btn => {
+      btn.onclick = () => {
+        const promo = promos.find(p => p.id === btn.dataset.addPromo);
+        if(!promo){ showNotice("Promo not found"); return; }
+        const rows = resolvePromoProducts(promo);
+        if(rows.length < 2){ showNotice("Promo products not found"); return; }
+        const selected = rows.map((r, idx) => {
+          const sel = document.querySelector(`[data-promo-select="${CSS.escape(promo.id)}"][data-index="${idx}"]`);
+          const size = sel?.value || "Default";
+          return { ...r, size };
+        });
+        for(const row of selected){
+          const required = Number(row.item.qty || 1);
+          if(getVariantStock(row.product, row.size) < required){ showNotice("Selected promo item is out of stock"); return; }
+        }
+        const item = {
+          type:"bundle", bundleId:promo.id, id:promo.id, name:promo.name, brand:"MR VAPE SHOP", category:"Promo", price:Number(promo.price || 0), image:firstProductImage(selected[0].product), qty:1,
+          size:selected.map(r => r.size).join(" + "),
+          bundleItems:selected.map(r => ({ productId:r.product.id, name:r.product.name, brand:r.product.brand, category:r.product.category, size:r.size, qty:Number(r.item.qty || 1), image:(r.product.variantImages && r.product.variantImages[r.size]) ? r.product.variantImages[r.size] : firstProductImage(r.product) }))
+        };
+        const existing = findExistingCartItem(cart, item);
+        const nextQty = (existing ? Number(existing.qty || 0) : 0) + 1;
+        if(!bundleStockAvailable(item, nextQty)){ showNotice("No more stock available for this promo selection"); return; }
+        if(existing) existing.qty = nextQty; else cart.push(item);
+        writeJSON(CART_KEY, cart); renderCart(); showNotice("Promo added to cart");
       };
-      const existing = findExistingCartItem(cart, item);
-      const nextQty = (existing ? Number(existing.qty || 0) : 0) + 1;
-      if(nextQty > podStock || nextQty > deviceStock){ showNotice("No more stock available for this bundle selection"); return; }
-      if(existing) existing.qty = nextQty; else cart.push(item);
-      writeJSON(CART_KEY, cart);
-      renderCart();
-      showNotice("Bundle added: " + podVariant + " + " + deviceVariant);
-    };
+    });
   }
 
-  function renderProducts(){
+  async function renderProducts(){
     const q = (searchInput.value || "").trim().toLowerCase();
     const filtered = products.filter(p => {
       const categoryOk = currentCategory === "All" || p.category === currentCategory;
@@ -892,7 +887,7 @@ function initShop(){
       return categoryOk && (!q || text.includes(q));
     });
 
-    const bundleSection = renderBundlePromoSection(q);
+    const bundleSection = await renderBundlePromoSection(q);
     if(!filtered.length && !bundleSection){
       gridEl.innerHTML = '<div style="grid-column:1/-1" class="empty">No products found.</div>';
       return;
@@ -934,7 +929,7 @@ function initShop(){
     }).join("");
 
     bindNoticeButtons();
-    bindBundlePromo();
+    await bindBundlePromo();
 
     gridEl.querySelectorAll("[data-view]").forEach(card => {
       card.onclick = (e) => {
@@ -1632,13 +1627,13 @@ function initShop(){
     document.querySelectorAll(".bottom-nav .nav-btn").forEach(btn => btn.classList.toggle("active", btn.id === activeId));
   }
 
-  function goCustomerTab(tab){
+  window.goCustomerTab = async function(tab){
     closeDrawer();
-    if(tab === "shop"){
+    if(tab === "shop" || tab === "home"){
       currentCategory = "All";
       if(searchInput) searchInput.value = "";
       renderCategories();
-      renderProducts();
+      await renderProducts();
       setBottomNavActive("navHome");
       window.scrollTo({top:0, behavior:"smooth"});
       return;
@@ -1646,40 +1641,33 @@ function initShop(){
     if(tab === "category"){
       currentCategory = "All";
       renderCategories();
-      renderProducts();
+      await renderProducts();
       setBottomNavActive("navCategory");
       const section = $("productsSection");
       if(section) section.scrollIntoView({behavior:"smooth", block:"start"});
       return;
     }
-    if(tab === "promos"){
+    if(tab === "promos" || tab === "promo"){
       currentCategory = "Promo";
       if(searchInput) searchInput.value = "";
       renderCategories();
-      renderProducts();
+      await renderProducts();
       setBottomNavActive("navPromos");
       const section = $("productsSection");
       if(section) section.scrollIntoView({behavior:"smooth", block:"start"});
       showNotice("Showing promo deals");
       return;
     }
-    if(tab === "cart"){
-      setBottomNavActive("navCart");
-      openDrawer("cart");
-      return;
-    }
-    if(tab === "account"){
-      setBottomNavActive("navAccount");
-      openDrawer("account");
-    }
+    if(tab === "cart"){ setBottomNavActive("navCart"); openDrawer("cart"); return; }
+    if(tab === "account" || tab === "me"){ setBottomNavActive("navAccount"); openDrawer("account"); }
   }
 
-  if($("openCartBtn")) $("openCartBtn").onclick = () => goCustomerTab("cart");
-  if($("navCart")) $("navCart").onclick = () => goCustomerTab("cart");
-  if($("navAccount")) $("navAccount").onclick = () => goCustomerTab("account");
-  if($("navCategory")) $("navCategory").onclick = () => goCustomerTab("category");
-  if($("navPromos")) $("navPromos").onclick = () => goCustomerTab("promos");
-  if($("navHome")) $("navHome").onclick = () => goCustomerTab("shop");
+  if($("openCartBtn")) $("openCartBtn").onclick = () => window.goCustomerTab("cart");
+  if($("navCart")) $("navCart").onclick = () => window.goCustomerTab("cart");
+  if($("navAccount")) $("navAccount").onclick = () => window.goCustomerTab("account");
+  if($("navCategory")) $("navCategory").onclick = () => window.goCustomerTab("category");
+  if($("navPromos")) $("navPromos").onclick = () => window.goCustomerTab("promos");
+  if($("navHome")) $("navHome").onclick = () => window.goCustomerTab("shop");
   if($("navTrack")) $("navTrack").onclick = () => openTrackingModal(account.phone || "");
   if($("openTrackTopBtn")) $("openTrackTopBtn").onclick = () => openTrackingModal(account.phone || "");
   if($("closeTrackingBtn")) $("closeTrackingBtn").onclick = closeTrackingModal;
@@ -1949,6 +1937,28 @@ function initAdmin(){
     $("resetShippingSettingsBtn") && ($("resetShippingSettingsBtn").onclick = () => { adminShippingSettings = defaultShippingSettings; renderShippingAdmin(adminShippingSettings); showNotice("Default shipping loaded"); });
   }
 
+
+  let adminPromosCache = [];
+  let editingPromoId = "";
+  function fillPromoProductSelects(){
+    ["promoProduct1","promoProduct2"].forEach((id, idx) => {
+      const el = $(id); if(!el) return;
+      el.innerHTML = '<option value="">Auto detect '+(idx===0?'Pod / V2':'Device / V3')+'</option>' + adminProductsCache.map(p => `<option value="${escapeHtml(p.id)}">${escapeHtml(p.name)} (${escapeHtml(p.category || '')})</option>`).join("");
+    });
+  }
+  function clearPromoForm(){ editingPromoId=""; if($("promoForm")) $("promoForm").reset(); if($("promoActive")) $("promoActive").checked=true; fillPromoProductSelects(); }
+  async function loadAdminPromos(){
+    adminPromosCache = await fetchPromos();
+    const tbody = $("adminPromoTable"); if(!tbody) return;
+    if(!adminPromosCache.length){ tbody.innerHTML = '<tr><td colspan="5" class="empty">No promos yet.</td></tr>'; return; }
+    tbody.innerHTML = adminPromosCache.map(p => `<tr><td><strong>${escapeHtml(p.name)}</strong><div class="small">${escapeHtml(p.badge || '')}</div></td><td>${money(p.price)}</td><td>${p.active ? 'ON' : 'OFF'}</td><td>${(p.items||[]).map(i => escapeHtml(i.productId || i.productMatch || 'auto')).join(' + ')}</td><td><div class="row-actions"><button class="btn ghost" data-edit-promo="${escapeHtml(p.id)}">Edit</button><button class="btn danger" data-delete-promo="${escapeHtml(p.id)}">Delete</button></div></td></tr>`).join("");
+    tbody.querySelectorAll("[data-edit-promo]").forEach(btn => btn.onclick = () => {
+      const p = adminPromosCache.find(x => x.id === btn.dataset.editPromo); if(!p) return; editingPromoId = p.id;
+      $("promoName").value = p.name || ""; $("promoPrice").value = p.price || 0; $("promoOldPrice").value = p.oldPrice || 0; $("promoBadge").value = p.badge || ""; $("promoActive").checked = p.active !== false; fillPromoProductSelects();
+      const items = p.items || []; if($("promoProduct1")) $("promoProduct1").value = items[0]?.productId || ""; if($("promoProduct2")) $("promoProduct2").value = items[1]?.productId || ""; switchTab("promos");
+    });
+    tbody.querySelectorAll("[data-delete-promo]").forEach(btn => btn.onclick = async () => { if(confirm("Delete this promo?")){ await deletePromoItem(btn.dataset.deletePromo); await loadAdminPromos(); showNotice("Promo deleted"); } });
+  }
   function switchTab(tabName){ document.querySelectorAll(".admin-tab-panel").forEach(panel => panel.classList.add("hidden")); const target = $("tab-"+tabName); if(target) target.classList.remove("hidden"); document.querySelectorAll(".admin-tab-btn").forEach(btn => btn.classList.toggle("active", btn.dataset.tab===tabName)); }
 
   function posProductCode(product){ return String(product.barcode || product.sku || product.id || ""); }
@@ -2035,7 +2045,9 @@ function initAdmin(){
     __lastAdminMessageCount = messages.length;
     renderMessages(messages);
   });
-  document.querySelectorAll(".admin-tab-btn").forEach(btn => btn.onclick = () => switchTab(btn.dataset.tab));
+  document.querySelectorAll(".admin-tab-btn").forEach(btn => btn.onclick = () => { switchTab(btn.dataset.tab); if(btn.dataset.tab === "promos") loadAdminPromos(); });
+  if($("promoForm")) $("promoForm").onsubmit = async (e) => { e.preventDefault(); const payload = { name:$("promoName").value, price:Number($("promoPrice").value), oldPrice:Number($("promoOldPrice").value || 0), badge:$("promoBadge").value || "BEST DEAL", active:$("promoActive").checked, items:[{ productId:$("promoProduct1").value, productMatch:"pod", qty:1 },{ productId:$("promoProduct2").value, productMatch:"device", qty:1 }] }; await savePromoItem(payload, editingPromoId); clearPromoForm(); await loadAdminPromos(); showNotice("Promo saved"); };
+  if($("clearPromoBtn")) $("clearPromoBtn").onclick = clearPromoForm;
   setupBarcodePos();
   setupShippingAdmin();
   switchTab("products");

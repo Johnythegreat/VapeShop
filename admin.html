@@ -13,6 +13,7 @@
       <a href="./index.html" class="side-link">← Customer Page</a>
       <button class="side-link active admin-tab-btn" type="button" data-tab="products">Products</button>
       <button class="side-link admin-tab-btn" type="button" data-tab="orders">Orders</button>
+      <button class="side-link admin-tab-btn" type="button" data-tab="promos">Promos</button>
       <button class="side-link admin-tab-btn" type="button" data-tab="pos">Barcode POS</button>
       <button class="side-link admin-tab-btn" type="button" data-tab="customers">Customers</button>
       <button class="side-link admin-tab-btn" type="button" data-tab="messages">Messages</button>
@@ -128,6 +129,44 @@
                 <tbody id="adminProductTable"></tbody>
               </table>
             </div>
+          </div>
+        </section>
+      </div>
+
+
+      <div id="tab-promos" class="admin-tab-panel hidden">
+        <section class="panel">
+          <div class="panel-head">
+            <h2>Editable Promo Bundles</h2>
+            <p>Create promos here. They automatically show when customers tap the bottom 🔥 Promos button.</p>
+          </div>
+          <form id="promoForm" class="admin-form">
+            <div class="form-grid">
+              <label>Promo Name<input id="promoName" required placeholder="V2 Pod + V3 Device Bundle" /></label>
+              <label>Promo Price<input id="promoPrice" type="number" min="0" required placeholder="750" /></label>
+              <label>Regular / Old Price<input id="promoOldPrice" type="number" min="0" placeholder="830" /></label>
+              <label>Badge<input id="promoBadge" placeholder="BEST DEAL" /></label>
+              <label>Item 1 / Pod<select id="promoProduct1"></select></label>
+              <label>Item 2 / Device<select id="promoProduct2"></select></label>
+              <label style="display:flex;align-items:center;gap:10px"><input id="promoActive" type="checkbox" checked style="width:auto" /> Active Promo</label>
+            </div>
+            <div class="form-actions">
+              <button type="submit" class="btn dark">Save Promo</button>
+              <button type="button" class="btn ghost" id="clearPromoBtn">Clear Promo Form</button>
+            </div>
+          </form>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <h2>Promo List</h2>
+            <p>Edit, delete, or turn OFF promos anytime.</p>
+          </div>
+          <div class="table-wrap">
+            <table class="admin-table">
+              <thead><tr><th>Promo</th><th>Price</th><th>Status</th><th>Items</th><th>Action</th></tr></thead>
+              <tbody id="adminPromoTable"></tbody>
+            </table>
           </div>
         </section>
       </div>
