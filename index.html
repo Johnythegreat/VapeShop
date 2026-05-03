@@ -1,339 +1,48 @@
+
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Mr Vape Shop</title>
-  <link rel="stylesheet" href="./styles-v3.css" />
+<title>Navigation Fix</title>
+<style>
+.bottom-nav {position:fixed;bottom:0;width:100%;display:flex;justify-content:space-around;background:#111;padding:10px;}
+.bottom-nav button {color:white;background:none;border:none;font-size:16px}
+.active {color:#00eaff;}
+.section {display:none;padding:20px}
+</style>
 </head>
-<body data-page="shop">
-  <!-- PRO 18+ AGE GATE -->
-  <div id="ageGate" class="age-gate hidden">
-    <div class="age-box pro-age-box">
-      <div class="age-badge">18+</div>
-      <h2>Age Verification</h2>
-      <p id="ageIntro">You must be at least <strong>18 years old</strong> to enter this vape shop.</p>
-      <div class="terms-box" id="termsBox">
-        <h4>Terms & Conditions</h4>
-        <p id="ageTermsText">By entering this website, you confirm that you are at least 18 years old. Vape products are intended for adults only. Please follow local laws and regulations regarding vape usage. By continuing, you accept full responsibility for your actions.</p>
-      </div>
-      <label class="check age-check">
-        <input type="checkbox" id="agreeCheck" />
-        <span>I confirm that I am 18+ and agree to the Terms & Conditions.</span>
-      </label>
-      <div class="age-actions">
-        <button id="enterBtn" class="btn dark" type="button" disabled>ENTER SHOP</button>
-        <button id="declineBtn" class="btn danger" type="button">DECLINE</button>
-      </div>
-      <small class="age-note">Your confirmation is saved for 24 hours.</small>
-    </div>
-  </div>
+<body>
 
-  <div class="app">
-    <header class="topbar">
-      <div class="topbar-inner">
-        <button class="icon-btn inbox-btn" id="openInboxBtn" title="Inbox" type="button">✉️<span class="inbox-badge hidden" id="inboxBadge">1</span></button>
-        <button class="icon-btn js-notice" data-text="Promos saved">📅</button>
-        <div class="brand-wrap"><img src="logo.png" class="brand-logo" alt="Mr Vape Shop Logo"><div class="logo">MR VAPE SHOP</div></div>
-        <button class="icon-btn" id="openTrackTopBtn" title="Track Order" type="button">📦</button>
-        <a class="icon-btn" href="./admin-login.html" title="Admin">⚙️</a>
-      </div>
-      <div class="search-wrap">
-        <div class="search">
-          <input id="searchInput" type="text" placeholder="Search pods, devices, juice, accessories..." />
-          <button id="searchBtn">🔍</button>
-        </div>
-        <button class="icon-btn" id="openCartBtn">🛒</button>
-      </div>
-      <div class="chips" id="chips"></div>
-    </header>
+<div id="shopSection" class="section">SHOP CONTENT</div>
+<div id="categorySection" class="section">CATEGORY CONTENT</div>
+<div id="promoSection" class="section">PROMO CONTENT</div>
+<div id="cartSection" class="section">CART CONTENT</div>
+<div id="meSection" class="section">ME CONTENT</div>
 
-    <div class="banner-strip">
-      <div>💨 Vape Essentials</div>
-      <div>✅ 18+ Only</div>
-      <div class="pink">Pods • Devices • Promos</div>
-    </div>
+<div class="bottom-nav">
+  <button onclick="showTab(event,'shop')">Shop</button>
+  <button onclick="showTab(event,'category')">Category</button>
+  <button onclick="showTab(event,'promos')">Promos</button>
+  <button onclick="showTab(event,'cart')">Cart</button>
+  <button onclick="showTab(event,'me')">Me</button>
+</div>
 
-    <section class="hero next-hero">
-      <div class="hero-card next-hero-card">
-        <div class="smoke-layer smoke-one"></div>
-        <div class="smoke-layer smoke-two"></div>
+<script>
+function showTab(e, tab){
+  document.querySelectorAll('.section').forEach(s=>s.style.display='none');
+  document.querySelectorAll('.bottom-nav button').forEach(b=>b.classList.remove('active'));
 
-        <div class="hero-copy hero-copy-wide">
-          <div class="hero-eyebrow premium-pill">Premium Vape Catalog • Pods • Devices • Fast Inquiry</div>
-          <h1 class="next-hero-title">🔥 Premium Vape Deals<br><span>Ready to Use</span> 🔥</h1>
-          <p>Shop pods, devices, e-juice, batteries, and accessories in one clean vape-style catalog.</p>
-          <p>Browse best sellers, promos, and new arrivals with real-time stock from the admin page.</p>
-          <p class="next-hero-promo">🔥 <strong>BUY 10 ITEMS, GET 1 FREE T-SHIRT</strong><br><span class="promo-small">Pick any design in our shop</span></p>
-          <p>🛡️ For adult customers only. Please buy responsibly.</p>
-          <p>📩 <strong>Message us now</strong> for availability, flavors, colors, and shop pickup details.</p>
-          <div class="cta-row">
-            <button class="btn light premium-btn" id="shopNowBtn">Shop Now</button>
-            <button class="btn dark premium-btn" id="openAccountBtn">Message Shop</button>
-          </div>
-        </div>
+  if(tab==='shop') document.getElementById('shopSection').style.display='block';
+  if(tab==='category') document.getElementById('categorySection').style.display='block';
+  if(tab==='promos') document.getElementById('promoSection').style.display='block';
+  if(tab==='cart') document.getElementById('cartSection').style.display='block';
+  if(tab==='me') document.getElementById('meSection').style.display='block';
 
-        <div class="next-hero-visual" aria-hidden="true">
-          <div class="orb orb-cyan"></div>
-          <div class="orb orb-purple"></div>
-          <div class="logo-plate">
-            <img src="logo.png" class="hero-logo-premium" alt="Mr Vape Shop Logo">
-          </div>
-          <div class="device-shadow"></div>
-        </div>
-      </div>
-    </section>
+  e.target.classList.add('active');
+}
 
-    <section class="section">
-      <div class="section-head">
-        <div>
-          <div class="section-title">Hot Vape Promos</div>
-          <div class="section-sub">Best deals, ready-to-use kits, and fast shop inquiry</div>
-        </div>
-      </div>
-      <div class="sale-strip premium-sale-strip">
-        <div class="sale-box"><strong>₱450</strong><span>X-Black V2 Pod</span></div>
-        <div class="sale-box"><strong>₱380</strong><span>X-Black V3 Device</span></div>
-        <div class="sale-box promo-box"><strong>FREE T-SHIRT</strong><span>Buy 10 items • Pick any design</span></div>
-      </div>
-    </section>
+// default
+document.getElementById('shopSection').style.display='block';
+</script>
 
-    <section class="section" id="productsSection">
-      <div class="section-head">
-        <div>
-          <div class="section-title">Featured Vape Products</div>
-          <div class="section-sub" id="sourceLabel">Loading products...</div>
-        </div>
-      </div>
-      <div class="grid" id="productGrid"></div>
-    </section>
-
-    <section class="section">
-      <div class="panel">
-        <div class="panel-head">
-          <h2>Why Choose Mr Vape Shop?</h2>
-          <p>Designed for quick browsing, clear prices, and easy admin updates</p>
-        </div>
-        <div class="notes">
-          <p><strong>Real vape catalog flow</strong> for pods, devices, juices, batteries, and accessories.</p>
-          <p><strong>Promo-ready layout</strong> with highlighted bundles, stock, flavors, colors, and prices.</p>
-          <p><strong>Same working system</strong> with customer profile, cart, checkout, admin tracking, messages, and order history.</p>
-        </div>
-      </div>
-    </section>
-
-    <nav class="bottom-nav">
-      <button class="nav-btn active" id="navHome">🏠<span>Shop</span></button>
-      <button class="nav-btn" id="navCategory">🧃<span>Category</span></button>
-      <button class="nav-btn" id="navPromos">🔥<span>Promos</span></button>
-      <button class="nav-btn" id="navCart">🛍️<span>Cart</span></button>
-      <button class="nav-btn" id="navAccount">👤<span>Me</span></button>
-    </nav>
-  </div>
-
-  <div class="drawer" id="drawer">
-    <div class="drawer-panel">
-      <div class="drawer-head">
-        <strong id="drawerTitle">Cart</strong>
-        <button class="icon-btn" id="closeDrawerBtn">✕</button>
-      </div>
-      <div class="drawer-content">
-        <div id="cartView" class="hidden"></div>
-        <div id="accountView" class="hidden"></div>
-      </div>
-    </div>
-  </div>
-
-  
-  <div class="ultra-gallery-modal hidden" id="ultraGalleryModal">
-    <button class="ultra-gallery-close" id="ultraGalleryClose" type="button">✕</button>
-    <button class="ultra-gallery-nav ultra-gallery-prev" id="ultraGalleryPrev" type="button">‹</button>
-    <img id="ultraGalleryImage" class="ultra-gallery-image" src="" alt="Product preview" />
-    <button class="ultra-gallery-nav ultra-gallery-next" id="ultraGalleryNext" type="button">›</button>
-    <div class="ultra-gallery-count" id="ultraGalleryCount">1 / 1</div>
-  </div>
-
-  <div class="product-page-modal hidden" id="productPageModal">
-    <div class="product-page-shell">
-      <div class="product-page-header">
-        <button class="icon-btn" id="closeProductPageBtn" type="button">←</button>
-        <div class="product-page-title">Product Details</div>
-        <button class="icon-btn js-notice" data-text="Share feature can be added next" type="button">⤴</button>
-      </div>
-
-      <div class="product-page-scroll">
-        <div class="product-gallery">
-          <div class="product-main-image-wrap">
-            <img id="productPageMainImage" class="product-main-image" src="" alt="Product image" />
-            <div class="product-image-badge" id="productPageBadge">New</div>
-          </div>
-
-          <div class="product-thumbs" id="productThumbs"></div>
-        </div>
-
-        <div class="product-page-body">
-          <div class="product-brand-row">
-            <div class="product-brand-text" id="productPageBrand">MR VAPE SHOP</div>
-            <button class="wishlist-chip js-notice" data-text="Wishlist feature can be added next" type="button">♡ Save</button>
-          </div>
-
-          <h2 class="product-page-name" id="productPageName"></h2>
-
-          <div class="product-page-price-row">
-            <div class="product-page-price" id="productPagePrice"></div>
-            <div class="product-page-old-price" id="productPageOldPrice"></div>
-          </div>
-
-          <div class="product-meta-block">
-            <div class="meta-pill" id="productPageCategory">Category</div>
-            <div class="meta-pill" id="productPageSold">0 sold</div>
-            <div class="meta-pill" id="productPageStock">Stock: 0</div>
-          </div>
-
-          <div class="product-section">
-            <div class="product-section-head">
-              <strong>Select Variant</strong>
-              <span id="selectedSizeLabel">No variant selected</span>
-            </div>
-            <div class="size-grid" id="sizeGrid">
-              <button class="size-option" type="button" data-size="Classic">Classic</button>
-              <button class="size-option" type="button" data-size="Mint">Mint</button>
-              <button class="size-option" type="button" data-size="Fruit">Fruit</button>
-              <button class="size-option" type="button" data-size="Ice">Ice</button>
-              <button class="size-option" type="button" data-size="Device Color">Device Color</button>
-            </div>
-          </div>
-
-          <div class="product-section">
-            <div class="product-section-head">
-              <strong>Quantity</strong>
-              <span>Adjust your order</span>
-            </div>
-            <div class="qty-box-large">
-              <button id="detailQtyMinus" type="button">−</button>
-              <strong id="detailQtyValue">1</strong>
-              <button id="detailQtyPlus" type="button">+</button>
-            </div>
-          </div>
-
-          <div class="product-section">
-            <div class="product-section-head">
-              <strong>Product Details</strong>
-              <span>Flavors, colors, and product info</span>
-            </div>
-            <div class="detail-list">
-              <div class="detail-row"><span>Store</span><strong>MR VAPE SHOP</strong></div>
-              <div class="detail-row"><span>Type</span><strong>Vape product</strong></div>
-              <div class="detail-row"><span>Variants</span><strong id="productDetailVariants">Flavors and colors available</strong></div>
-              <div class="detail-row"><span>Promo</span><strong>Bundle deals available</strong></div>
-              <div class="detail-row"><span>Reminder</span><strong>For adult customers only</strong></div>
-            </div>
-          </div>
-
-          <div class="product-section">
-            <div class="product-section-head">
-              <strong>Description</strong>
-            </div>
-            <p class="product-description" id="productPageDescription">
-              Premium vape product with available variants. Check stock, price, flavor, and color before checkout.
-            </p>
-          </div>
-        </div>
-      </div>
-
-      <div class="product-bottom-bar">
-        <div class="product-bottom-price">
-          <span>Total</span>
-          <strong id="detailTotalPrice">₱0</strong>
-        </div>
-        <button class="btn dark product-add-btn" id="productPageAddToCartBtn" type="button">Add to Cart</button>
-      </div>
-    </div>
-  </div>
-
-
-  
-  
-  <div class="inquiry-modal hidden" id="inquiryModal">
-    <div class="inquiry-card messenger-card">
-      <div class="drawer-head">
-        <strong>Vape Shop Chat</strong>
-        <button class="icon-btn" id="closeInquiryBtn">✕</button>
-      </div>
-      <div class="messenger-top-fields">
-        <div class="field">
-          <label>Name</label>
-          <input id="inq_name" placeholder="Your full name" />
-        </div>
-        <div class="field">
-          <label>Phone</label>
-          <input id="inq_phone" placeholder="09xxxxxxxxxx" />
-        </div>
-      </div>
-      <div class="messenger-chat-window" id="customerChatWindow"></div>
-      <div class="messenger-compose">
-        <div class="chat-quick-row" aria-label="Quick messages">
-          <button class="chat-quick" type="button" data-quick-message="Hi, I want to check available flavors.">Check flavors</button>
-          <button class="chat-quick" type="button" data-quick-message="Hi, I want to order a promo bundle.">Promo bundle</button>
-          <button class="chat-quick" type="button" data-quick-message="Hi, is pickup available today?">Pickup today</button>
-        </div>
-        <textarea id="inq_message" placeholder="Tell us the product, flavor, device color, quantity, and pickup or delivery details."></textarea>
-        <div class="chat-upload-row">
-          <label class="upload-chip" for="inq_image">📷 Add Image</label>
-          <input id="inq_image" class="hidden-file-input" type="file" accept="image/*" />
-          <span class="upload-file-name" id="inqImageName">No image selected</span>
-        </div>
-        <div class="chat-image-preview hidden" id="inqImagePreviewWrap">
-          <img id="inqImagePreview" alt="Selected image preview" />
-          <button class="mini-remove-btn" id="removeInquiryImageBtn" type="button">Remove</button>
-        </div>
-        <button class="btn dark full-btn" id="sendInquiryBtn" type="button">Send Message</button>
-      </div>
-    </div>
-  </div>
-
-
-
-  <div class="tracking-modal hidden" id="trackingModal">
-    <div class="tracking-panel">
-      <div class="tracking-head">
-        <div>
-          <strong>📦 Track Your Order</strong>
-          <p>Enter your Order ID or phone number to see the latest status.</p>
-        </div>
-        <button class="icon-btn" id="closeTrackingBtn" type="button">✕</button>
-      </div>
-      <div class="tracking-search">
-        <input id="trackingInput" type="text" placeholder="Order ID or 09xxxxxxxxx" />
-        <button class="btn dark" id="trackingSearchBtn" type="button">Track</button>
-      </div>
-      <div class="tracking-result" id="trackingResult">
-        <div class="tracking-empty">Use the phone number from your profile or the receipt/order ID.</div>
-      </div>
-    </div>
-  </div>
-
-  <div class="notice" id="notice"></div>
-
-
-  <script>
-    (function(){
-      var SETTINGS_KEY='mrVapeAgeGateSettings', VERIFIED_KEY='mrVapeAgeVerifiedAt';
-      var defaults={enabled:true,minimumAge:18,expiryHours:24,terms:'By entering this website, you confirm that you are at least 18 years old. Vape products are intended for adults only. Please follow local laws and regulations regarding vape usage. By continuing, you accept full responsibility for your actions.'};
-      function getSettings(){try{return Object.assign({},defaults,JSON.parse(localStorage.getItem(SETTINGS_KEY)||'{}'));}catch(e){return defaults;}}
-      var settings=getSettings(), gate=document.getElementById('ageGate'); if(!gate)return;
-      var check=document.getElementById('agreeCheck'), enterBtn=document.getElementById('enterBtn'), declineBtn=document.getElementById('declineBtn');
-      document.getElementById('ageIntro').innerHTML='You must be at least <strong>'+settings.minimumAge+' years old</strong> to enter this vape shop.';
-      document.getElementById('ageTermsText').textContent=settings.terms||defaults.terms;
-      document.querySelector('.age-note').textContent='Your confirmation is saved for '+settings.expiryHours+' hours.';
-      var verifiedAt=Number(localStorage.getItem(VERIFIED_KEY)||0), stillValid=verifiedAt&&(Date.now()-verifiedAt)<(Number(settings.expiryHours||24)*60*60*1000);
-      if(!settings.enabled||stillValid){gate.classList.add('hidden');}else{gate.classList.remove('hidden');document.body.classList.add('age-locked');}
-      check.addEventListener('change',function(){enterBtn.disabled=!check.checked;});
-      enterBtn.addEventListener('click',function(){localStorage.setItem(VERIFIED_KEY,String(Date.now()));gate.classList.add('hidden');document.body.classList.remove('age-locked');});
-      declineBtn.addEventListener('click',function(){window.location.href='https://www.google.com';});
-    })();
-  </script>
-
-  <script type="module" src="./app-v3.js"></script>
 </body>
 </html>
