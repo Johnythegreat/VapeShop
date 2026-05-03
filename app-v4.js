@@ -1834,11 +1834,17 @@ function initShop(){
 
 async function createPosSale(cart, account={}, payment={}){
   const receiptNo = payment.receiptNo || ("MRV-" + new Date().toISOString().slice(2,10).replace(/-/g,"") + "-" + Date.now().toString().slice(-6));
+  const resolveLocalProduct = (item, list) => {
+    const keys = [item.productDocId, item.docId, item.firestoreId, item.productId, item.id, item.sku, item.barcode].map(x => String(x || "")).filter(Boolean);
+    return list.find(p => [p.id,p.docId,p.firestoreId,p._docId,p.sku,p.barcode].map(x=>String(x||"")).some(v => keys.includes(v)));
+  };
   const cleanItems = cart.map(item => ({
     name:item.name,
     qty:Number(item.qty || 1),
     price:Number(item.price || 0),
-    productId:item.id,
+    cost:Number(item.cost || item.costPrice || 0),
+    productId:item.productId || item.id,
+    productDocId:item.productDocId || item.docId || item.firestoreId || item.id,
     size:item.size || item.variant || "Default",
     image:item.image || ""
   }));
@@ -1861,35 +1867,47 @@ async function createPosSale(cart, account={}, payment={}){
   if(getMode()==="firebase" && firebaseReady){
     let orderId = receiptNo;
     await runTransaction(db, async (transaction) => {
-      // Firestore transactions require all reads before any writes.
-      const productReads = [];
+      // IMPORTANT: aggregate all cart lines by product document.
+      // This prevents V2 flavor A + V2 flavor B in the same POS sale from overwriting each other.
+      const rows = [];
       for(const item of cart){
-        const ref = doc(db, "products", item.id);
+        const docId = item.productDocId || item.docId || item.firestoreId || item.id;
+        const ref = doc(db, "products", docId);
         const snap = await transaction.get(ref);
-        productReads.push({ item, ref, snap });
+        rows.push({ item, ref, snap });
       }
 
-      const productUpdates = [];
-      for(const row of productReads){
+      const updateMap = new Map();
+      for(const row of rows){
         const { item, ref, snap } = row;
-        if(!snap.exists()) throw new Error(item.name + " not found");
+        if(!snap.exists()) throw new Error((item.name || "Product") + " not found. Please reselect the item in POS.");
         const data = snap.data();
         const qty = Number(item.qty || 1);
         const selectedVariant = item.size || item.variant || "Default";
-        const variantStocks = (data.variantStocks && typeof data.variantStocks === "object") ? { ...data.variantStocks } : {};
-        if(Object.keys(variantStocks).length && Object.prototype.hasOwnProperty.call(variantStocks, selectedVariant)){
-          const current = Number(variantStocks[selectedVariant] || 0);
-          if(current < qty) throw new Error("Not enough stock for " + item.name + " - " + selectedVariant);
-          variantStocks[selectedVariant] = current - qty;
-          productUpdates.push({ ref, payload:{ variantStocks, stock: sumVariantStocks(variantStocks) } });
+        const key = ref.path;
+        let state = updateMap.get(key);
+        if(!state){
+          state = {
+            ref,
+            variantStocks:(data.variantStocks && typeof data.variantStocks === "object") ? { ...data.variantStocks } : null,
+            stock:Number(data.stock || 0)
+          };
+          updateMap.set(key, state);
+        }
+        if(state.variantStocks && Object.prototype.hasOwnProperty.call(state.variantStocks, selectedVariant)){
+          const current = Number(state.variantStocks[selectedVariant] || 0);
+          if(current < qty) throw new Error("Not enough stock for " + (item.name || "Product") + " - " + selectedVariant);
+          state.variantStocks[selectedVariant] = current - qty;
         } else {
-          const stock = Number(data.stock || 0);
-          if(stock < qty) throw new Error("Not enough stock for " + item.name);
-          productUpdates.push({ ref, payload:{ stock: stock - qty } });
+          if(state.stock < qty) throw new Error("Not enough stock for " + (item.name || "Product"));
+          state.stock -= qty;
         }
       }
 
-      productUpdates.forEach(u => transaction.update(u.ref, u.payload));
+      updateMap.forEach(state => {
+        if(state.variantStocks) transaction.update(state.ref, { variantStocks:state.variantStocks, stock:sumVariantStocks(state.variantStocks) });
+        else transaction.update(state.ref, { stock:state.stock });
+      });
       const orderRef = doc(collection(db, "order_history"));
       orderId = orderRef.id;
       transaction.set(orderRef, { ...orderPayload, createdAt:serverTimestamp(), paidAt:serverTimestamp(), movedAt:serverTimestamp() });
@@ -1898,11 +1916,11 @@ async function createPosSale(cart, account={}, payment={}){
   }
   const products = getLocalProducts();
   for(const item of cart){
-    const p = products.find(x => x.id === item.id);
+    const p = resolveLocalProduct(item, products);
     if(!p || getVariantStock(p, item.size) < Number(item.qty || 1)) throw new Error("Not enough stock for " + item.name + (item.size ? " - " + item.size : ""));
   }
   for(const item of cart){
-    const p = products.find(x => x.id === item.id);
+    const p = resolveLocalProduct(item, products);
     const map = variantStockMap(p);
     if(item.size && Object.prototype.hasOwnProperty.call(map, item.size)){
       p.variantStocks = { ...map, [item.size]: Number(map[item.size] || 0) - Number(item.qty || 1) };
@@ -2112,13 +2130,13 @@ function initAdmin(){
             cost += componentCost;
             itemsSold += componentQty;
             const key = (component.productId || component.id || component.name || "Bundle item") + "::" + (component.size || component.variant || "Default");
-            const existing = rowsMap.get(key) || { name:component.name || prod?.name || "Bundle item", variant:component.size || component.variant || "Default", qty:0, revenue:0, cost:0, profit:0 };
+            const existing = rowsMap.get(key) || { name:prod?.name || component.name || "Bundle item", variant:component.size || component.variant || "Default", qty:0, revenue:0, cost:0, profit:0 };
             existing.qty += componentQty;
             existing.cost += componentCost;
             rowsMap.set(key, existing);
           });
         }else{
-          const prod = productByAnyId(item.productId || item.id);
+          const prod = productByAnyId(item.productDocId || item.productId || item.id);
           const qty = itemQty;
           const lineRevenue = Number(item.price || 0) * qty;
           const unitCost = Number(item.cost || item.costPrice || productUnitCost(prod));
@@ -2126,7 +2144,7 @@ function initAdmin(){
           cost += lineCost;
           itemsSold += qty;
           const key = (item.productId || item.id || item.name || "Item") + "::" + (item.size || item.variant || "Default");
-          const existing = rowsMap.get(key) || { name:item.name || prod?.name || "Item", variant:item.size || item.variant || "Default", qty:0, revenue:0, cost:0, profit:0 };
+          const existing = rowsMap.get(key) || { name:prod?.name || item.name || "Item", variant:item.size || item.variant || "Default", qty:0, revenue:0, cost:0, profit:0 };
           existing.qty += qty;
           existing.revenue += lineRevenue;
           existing.cost += lineCost;
@@ -2292,7 +2310,7 @@ function initAdmin(){
       if(available < existingQty + qty){ showNotice("Not enough stock for " + variant); return; }
       const existing = posCart.find(i => i.id === selectedPosProduct.id && i.size === variant);
       if(existing) existing.qty = Number(existing.qty) + qty;
-      else posCart.push({ id:selectedPosProduct.id, name:selectedPosProduct.name, price:Number(selectedPosProduct.price || 0), qty, size:variant, image:(selectedPosProduct.variantImages && selectedPosProduct.variantImages[variant]) || firstProductImage(selectedPosProduct) });
+      else posCart.push({ id:selectedPosProduct.id, productId:selectedPosProduct.id, productDocId:selectedPosProduct.docId || selectedPosProduct.firestoreId || selectedPosProduct.id, name:selectedPosProduct.name, price:Number(selectedPosProduct.price || 0), cost:Number(selectedPosProduct.costPrice || selectedPosProduct.cost || 0), qty, size:variant, image:(selectedPosProduct.variantImages && selectedPosProduct.variantImages[variant]) || firstProductImage(selectedPosProduct) });
       $("posQty").value = 1; scan.value = ""; renderPosSearch(""); renderPosCart(); showNotice("Added to POS cart"); scan.focus();
     };
     if(cash) cash.addEventListener('input', renderPosCart);
