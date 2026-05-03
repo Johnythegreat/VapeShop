@@ -16,6 +16,10 @@ const CHAT_ID_KEY = "vape_shop_chat_id";
 const CUSTOMER_LAST_SEEN_KEY = "vape_shop_customer_last_seen";
 const MODE_KEY = "vape_shop_mode";
 const categories = ["All","Pods","Devices","E-Juice","Battery","Accessories","Promo"];
+function productDocId(product){
+  return String(product?.docId || product?.firestoreId || product?._docId || product?.id || "");
+}
+
 const demoProducts = [
   {
     name:"X-Black V2 Pod",
@@ -593,7 +597,7 @@ async function cancelAndRestoreOrder(orderId, activeOrdersCache=[]){
 }
 function subscribeProducts(callback){
   if(getMode()==="firebase" && firebaseReady){
-    return onSnapshot(query(collection(db, "products"), orderBy("createdAt", "desc")), (snapshot) => callback(snapshot.docs.map(d => ({ id:d.id, ...d.data() })), "firebase"), () => { seedLocalIfEmpty(); callback(getLocalProducts(), "local"); });
+    return onSnapshot(query(collection(db, "products"), orderBy("createdAt", "desc")), (snapshot) => callback(snapshot.docs.map(d => { const data = d.data(); return { ...data, id:(data.id || d.id), docId:d.id, firestoreId:d.id }; }), "firebase"), () => { seedLocalIfEmpty(); callback(getLocalProducts(), "local"); });
   }
   seedLocalIfEmpty(); callback(getLocalProducts(), "local"); return storageSync(() => callback(getLocalProducts(), "local"));
 }
@@ -601,14 +605,14 @@ function subscribeOrders(callback){
   if(getMode()==="firebase" && firebaseReady){
     return onSnapshot(query(collection(db, "orders"), orderBy("createdAt", "desc")), async (snapshot) => {
       let history = []; try { history = await fetchFirebaseDocs("order_history", "movedAt"); } catch {}
-      callback(snapshot.docs.map(d => ({ id:d.id, ...d.data() })), history, "firebase");
+      callback(snapshot.docs.map(d => { const data = d.data(); return { ...data, id:(data.id || d.id), docId:d.id, firestoreId:d.id }; }), history, "firebase");
     }, () => callback(getLocalOrders(), getLocalHistory(), "local"));
   }
   callback(getLocalOrders(), getLocalHistory(), "local"); return storageSync(() => callback(getLocalOrders(), getLocalHistory(), "local"));
 }
 function subscribeCustomers(callback){
   if(getMode()==="firebase" && firebaseReady){
-    return onSnapshot(query(collection(db, "customers_public"), orderBy("updatedAt", "desc")), (snapshot) => callback(snapshot.docs.map(d => ({ id:d.id, ...d.data() })), "firebase"), () => callback(getLocalCustomers(), "local"));
+    return onSnapshot(query(collection(db, "customers_public"), orderBy("updatedAt", "desc")), (snapshot) => callback(snapshot.docs.map(d => { const data = d.data(); return { ...data, id:(data.id || d.id), docId:d.id, firestoreId:d.id }; }), "firebase"), () => callback(getLocalCustomers(), "local"));
   }
   callback(getLocalCustomers(), "local"); return storageSync(() => callback(getLocalCustomers(), "local"));
 }
@@ -872,11 +876,23 @@ function initShop(){
   }
 
 
+  function productDocId(product){
+    return String(product?.docId || product?.firestoreId || product?._docId || product?.id || "");
+  }
+
   function productMatchesPromoItem(product, item){
-    if(item.productId && product.id === item.productId) return true;
+    const wantedId = String(item?.productId || item?.docId || "").trim();
+    const productIds = [product?.docId, product?.firestoreId, product?._docId, product?.id, product?.sku, product?.barcode].map(v => String(v || "").trim()).filter(Boolean);
+
+    // IMPORTANT: if admin selected a specific product, only match that exact product.
+    // Do not fallback to pod/device auto-detect, because combo products like "A1 Pod & Battery" match both words.
+    if(wantedId) return productIds.includes(wantedId);
+
     const hay = ((product.name || "") + " " + (product.category || "") + " " + (product.brand || "")).toLowerCase();
-    if(item.productMatch === "pod") return /pod|pods|v2/.test(hay);
-    if(item.productMatch === "device") return /device|battery|v3/.test(hay);
+    const category = String(product.category || "").toLowerCase();
+    if(category === "promo") return false;
+    if(item.productMatch === "pod") return category === "pods" || /\bv2\b|\bpod\b|\bpods\b/.test(hay);
+    if(item.productMatch === "device") return category === "battery" || category === "devices" || /\bv3\b|\bdevice\b|\bbattery\b/.test(hay);
     return false;
   }
 
@@ -934,7 +950,7 @@ function initShop(){
         const item = {
           type:"bundle", bundleId:promo.id, id:promo.id, name:promo.name, brand:"MR VAPE SHOP", category:"Promo", price:Number(promo.price || 0), image:firstProductImage(selected[0].product), qty:1,
           size:selected.map(r => r.size).join(" + "),
-          bundleItems:selected.map(r => ({ productId:r.product.id, name:r.product.name, brand:r.product.brand, category:r.product.category, size:r.size, qty:Number(r.item.qty || 1), image:(r.product.variantImages && r.product.variantImages[r.size]) ? r.product.variantImages[r.size] : firstProductImage(r.product) }))
+          bundleItems:selected.map(r => ({ productId:productDocId(r.product), name:r.product.name, brand:r.product.brand, category:r.product.category, size:r.size, qty:Number(r.item.qty || 1), image:(r.product.variantImages && r.product.variantImages[r.size]) ? r.product.variantImages[r.size] : firstProductImage(r.product) }))
         };
         const existing = findExistingCartItem(cart, item);
         const nextQty = (existing ? Number(existing.qty || 0) : 0) + 1;
@@ -2009,7 +2025,7 @@ function initAdmin(){
   function fillPromoProductSelects(){
     ["promoProduct1","promoProduct2"].forEach((id, idx) => {
       const el = $(id); if(!el) return;
-      el.innerHTML = '<option value="">Auto detect '+(idx===0?'Pod / V2':'Device / V3')+'</option>' + adminProductsCache.map(p => `<option value="${escapeHtml(p.id)}">${escapeHtml(p.name)} (${escapeHtml(p.category || '')})</option>`).join("");
+      el.innerHTML = '<option value="">Auto detect '+(idx===0?'Pod / V2':'Device / V3')+'</option>' + adminProductsCache.map(p => `<option value="${escapeHtml(productDocId(p))}">${escapeHtml(p.name)} (${escapeHtml(p.category || '')})</option>`).join("");
     });
   }
   function clearPromoForm(){ editingPromoId=""; if($("promoForm")) $("promoForm").reset(); if($("promoActive")) $("promoActive").checked=true; fillPromoProductSelects(); }
@@ -2017,7 +2033,7 @@ function initAdmin(){
     adminPromosCache = await fetchPromos();
     const tbody = $("adminPromoTable"); if(!tbody) return;
     if(!adminPromosCache.length){ tbody.innerHTML = '<tr><td colspan="5" class="empty">No promos yet.</td></tr>'; return; }
-    tbody.innerHTML = adminPromosCache.map(p => `<tr><td><strong>${escapeHtml(p.name)}</strong><div class="small">${escapeHtml(p.badge || '')}</div></td><td>${money(p.price)}</td><td>${p.active ? 'ON' : 'OFF'}</td><td>${(p.items||[]).map(i => escapeHtml(i.productId || i.productMatch || 'auto')).join(' + ')}</td><td><div class="row-actions"><button class="btn ghost" data-edit-promo="${escapeHtml(p.id)}">Edit</button><button class="btn danger" data-delete-promo="${escapeHtml(p.id)}">Delete</button></div></td></tr>`).join("");
+    tbody.innerHTML = adminPromosCache.map(p => `<tr><td><strong>${escapeHtml(p.name)}</strong><div class="small">${escapeHtml(p.badge || '')}</div></td><td>${money(p.price)}</td><td>${p.active ? 'ON' : 'OFF'}</td><td>${(p.items||[]).map(i => { const prod = adminProductsCache.find(x => productMatchesPromoItem(x, i)); return escapeHtml(prod ? prod.name : (i.productId || i.productMatch || 'auto')); }).join(' + ')}</td><td><div class="row-actions"><button class="btn ghost" data-edit-promo="${escapeHtml(p.id)}">Edit</button><button class="btn danger" data-delete-promo="${escapeHtml(p.id)}">Delete</button></div></td></tr>`).join("");
     tbody.querySelectorAll("[data-edit-promo]").forEach(btn => btn.onclick = () => {
       const p = adminPromosCache.find(x => x.id === btn.dataset.editPromo); if(!p) return; editingPromoId = p.id;
       $("promoName").value = p.name || ""; $("promoPrice").value = p.price || 0; $("promoOldPrice").value = p.oldPrice || 0; $("promoBadge").value = p.badge || ""; $("promoActive").checked = p.active !== false; fillPromoProductSelects();
