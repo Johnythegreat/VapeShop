@@ -1,0 +1,19 @@
+SALES REPORT SYSTEM UPGRADE
+
+Added Admin -> Reports tab:
+- Monthly report selector
+- Items sold count
+- Total revenue
+- Total cost
+- Profit
+- Top sold items table
+- Export CSV button
+
+Important for profit:
+- Edit each product and fill Cost Price / Capital.
+- If Cost Price is 0, profit will show higher because the system has no cost data for that product.
+
+Report source:
+- Uses active orders + order history.
+- Excludes cancelled orders by default.
+- Status filter can show all, paid/completed only, or completed only.

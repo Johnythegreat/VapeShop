@@ -13,6 +13,7 @@
       <a href="./index.html" class="side-link">← Customer Page</a>
       <button class="side-link active admin-tab-btn" type="button" data-tab="products">Products</button>
       <button class="side-link admin-tab-btn" type="button" data-tab="orders">Orders</button>
+      <button class="side-link admin-tab-btn" type="button" data-tab="reports">Reports</button>
       <button class="side-link admin-tab-btn" type="button" data-tab="promos">Promos</button>
       <button class="side-link admin-tab-btn" type="button" data-tab="pos">Barcode POS</button>
       <button class="side-link admin-tab-btn" type="button" data-tab="customers">Customers</button>
@@ -78,6 +79,7 @@
                   </select>
                 </label>
                 <label>Price<input id="price" type="number" min="0" required placeholder="450" /></label>
+                <label>Cost Price / Capital<input id="costPrice" type="number" min="0" placeholder="300" /></label>
                 <label>Old Price<input id="oldPrice" type="number" min="0" required placeholder="500" /></label>
                 <label>Total Stock<input id="stock" type="number" min="0" required placeholder="Auto total from variants" /></label>
                 <label>Sold Text<input id="sold" placeholder="120+ sold" /></label>
@@ -226,6 +228,51 @@
                 <button class="btn ghost" type="button" id="posClearBtn">Clear POS</button>
               </div>
             </div>
+          </div>
+        </section>
+      </div>
+
+      <div id="tab-reports" class="admin-tab-panel hidden">
+        <section class="panel">
+          <div class="panel-head">
+            <h2>Monthly Sales Report</h2>
+            <p>Track how many items sold, total revenue, total cost, and profit. Add Cost Price / Capital in each product to get accurate profit.</p>
+          </div>
+          <div class="admin-form">
+            <div class="form-grid">
+              <label>Report Month<input id="reportMonth" type="month" /></label>
+              <label>Status Filter
+                <select id="reportStatusFilter">
+                  <option value="all">All non-cancelled orders</option>
+                  <option value="paid-completed">Paid / Completed only</option>
+                  <option value="completed">Completed only</option>
+                </select>
+              </label>
+            </div>
+            <div class="form-actions">
+              <button type="button" class="btn dark" id="generateReportBtn">Generate Report</button>
+              <button type="button" class="btn ghost" id="exportReportBtn">Export CSV</button>
+            </div>
+          </div>
+        </section>
+
+        <section class="stats-grid report-stats">
+          <div class="stat-card"><span>Items Sold</span><strong id="reportItemsSold">0</strong></div>
+          <div class="stat-card"><span>Total Revenue</span><strong id="reportRevenue">₱0</strong></div>
+          <div class="stat-card"><span>Total Cost</span><strong id="reportCost">₱0</strong></div>
+          <div class="stat-card"><span>Profit</span><strong id="reportProfit">₱0</strong></div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <h2>Top Sold Items</h2>
+            <p id="reportSubtitle">Choose a month, then generate.</p>
+          </div>
+          <div class="table-wrap">
+            <table class="admin-table">
+              <thead><tr><th>Item</th><th>Variant</th><th>Qty Sold</th><th>Revenue</th><th>Cost</th><th>Profit</th></tr></thead>
+              <tbody id="reportItemsTable"><tr><td colspan="6" class="empty">No report generated yet.</td></tr></tbody>
+            </table>
           </div>
         </section>
       </div>

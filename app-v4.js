@@ -1919,7 +1919,7 @@ async function createPosSale(cart, account={}, payment={}){
 }
 
 function initAdmin(){
-  bindNoticeButtons(); const form = $("productForm"), table = $("adminProductTable"); let activeOrdersCache = []; let adminProductsCache = []; let posCart = []; let selectedPosProduct = null; let adminShippingSettings = getLocalShippingSettings();
+  bindNoticeButtons(); const form = $("productForm"), table = $("adminProductTable"); let activeOrdersCache = []; let historyOrdersCache = []; let adminProductsCache = []; let lastReportRows = []; let posCart = []; let selectedPosProduct = null; let adminShippingSettings = getLocalShippingSettings();
   const topActions = document.querySelector(".top-actions-wrap");
   if(topActions && !document.getElementById("logoutAdminBtn")){
     const logoutBtn = document.createElement("button");
@@ -1931,7 +1931,7 @@ function initAdmin(){
   }
   function updateStats(items){ $("statProducts").textContent = items.length; $("statStock").textContent = items.reduce((a,b)=>a+Number(b.stock||0),0); $("statLow").textContent = items.filter(x=>Number(x.stock||0)<=10).length; $("statCategories").textContent = new Set(items.map(x=>x.category)).size; }
   function clearForm(){ form.reset(); $("docId").value = ""; if($("variants")) $("variants").value = ""; if($("variantImages")) $("variantImages").value = "{}"; if($("image")) $("image").value = ""; window.__pendingProductImages = [""]; setTimeout(() => { window.hydrateVariantRows && window.hydrateVariantRows(null); window.hydrateProductImageRows && window.hydrateProductImageRows([""]); }, 0); }
-  function fillForm(item){ $("docId").value=item.id; $("name").value=item.name||""; $("brand").value=item.brand||""; $("category").value=item.category||"Pods"; $("price").value=item.price||0; $("oldPrice").value=item.oldPrice||0; $("stock").value=item.stock||0; $("sold").value=item.sold||""; $("badge").value=item.badge||""; if($("variants")) $("variants").value = Array.isArray(item.variants) ? item.variants.join("\n") : ""; if($("variantImages")) $("variantImages").value = JSON.stringify(item.variantImages || {}); const variantImgs = item.variantImages && typeof item.variantImages === "object" ? Object.values(item.variantImages).filter(Boolean) : []; const allImgs = (Array.isArray(item.images) && item.images.length ? item.images : [item.image]).filter(Boolean); const extraImgs = allImgs.filter(img => !variantImgs.includes(img)); if($("image")) $("image").value = allImgs[0] || ""; window.__pendingProductImages = extraImgs.length ? extraImgs : [""]; setTimeout(() => { window.hydrateVariantRows && window.hydrateVariantRows(item); window.hydrateProductImageRows && window.hydrateProductImageRows(window.__pendingProductImages); }, 0); window.scrollTo({top:0, behavior:"smooth"}); }
+  function fillForm(item){ $("docId").value=item.id; $("name").value=item.name||""; $("brand").value=item.brand||""; $("category").value=item.category||"Pods"; $("price").value=item.price||0; if($("costPrice")) $("costPrice").value=item.costPrice||item.cost||0; $("oldPrice").value=item.oldPrice||0; $("stock").value=item.stock||0; $("sold").value=item.sold||""; $("badge").value=item.badge||""; if($("variants")) $("variants").value = Array.isArray(item.variants) ? item.variants.join("\n") : ""; if($("variantImages")) $("variantImages").value = JSON.stringify(item.variantImages || {}); const variantImgs = item.variantImages && typeof item.variantImages === "object" ? Object.values(item.variantImages).filter(Boolean) : []; const allImgs = (Array.isArray(item.images) && item.images.length ? item.images : [item.image]).filter(Boolean); const extraImgs = allImgs.filter(img => !variantImgs.includes(img)); if($("image")) $("image").value = allImgs[0] || ""; window.__pendingProductImages = extraImgs.length ? extraImgs : [""]; setTimeout(() => { window.hydrateVariantRows && window.hydrateVariantRows(item); window.hydrateProductImageRows && window.hydrateProductImageRows(window.__pendingProductImages); }, 0); window.scrollTo({top:0, behavior:"smooth"}); }
   function renderProductsAdmin(items, source){ $("adminSourceLabel").textContent = source==="firebase" ? "Live from Firebase" : "Using local fallback"; updateStats(items); if(!items.length){ table.innerHTML = '<tr><td colspan="5" class="empty">No products found.</td></tr>'; return; } table.innerHTML = items.map(item => `<tr><td><div style="font-weight:800">${escapeHtml(item.name)}</div><div class="small">${escapeHtml(item.brand)}</div></td><td>${escapeHtml(item.category)}</td><td>${money(item.price)}</td><td>${Number(item.stock||0)}</td><td><div class="row-actions"><button class="btn ghost" data-edit="${item.id}">Edit</button><button class="btn dark" data-delete="${item.id}">Delete</button></div></td></tr>`).join(""); table.querySelectorAll("[data-edit]").forEach(btn => btn.onclick = () => { const item = items.find(x => x.id===btn.dataset.edit); if(item) fillForm(item); }); table.querySelectorAll("[data-delete]").forEach(btn => btn.onclick = async () => { try { await deleteProductItem(btn.dataset.delete); showNotice("Product deleted"); } catch { showNotice("Delete failed"); } }); }
   function receiptNumber(order){
     if(order && order.receiptNo) return String(order.receiptNo);
@@ -2053,6 +2053,135 @@ function initAdmin(){
       zones
     });
   }
+
+  function toDateSafe(value){
+    if(!value) return null;
+    if(value instanceof Date) return value;
+    if(value.seconds) return new Date(Number(value.seconds) * 1000);
+    if(value.toDate && typeof value.toDate === "function") return value.toDate();
+    const d = new Date(value);
+    return isNaN(d.getTime()) ? null : d;
+  }
+  function currentMonthValue(){
+    const d = new Date();
+    return d.getFullYear() + "-" + String(d.getMonth()+1).padStart(2,"0");
+  }
+  function productByAnyId(id){
+    const target = String(id || "");
+    return adminProductsCache.find(p => [p.id,p.docId,p.firestoreId,p._docId,p.sku,p.barcode].map(x=>String(x||"")).includes(target));
+  }
+  function productUnitCost(product){
+    if(!product) return 0;
+    return Number(product.costPrice || product.cost || product.capital || product.buyPrice || product.supplierPrice || 0);
+  }
+  function reportOrderDate(order){
+    return toDateSafe(order.paidAt) || toDateSafe(order.movedAt) || toDateSafe(order.createdAt) || toDateSafe(order.date);
+  }
+  function orderAllowedByReportStatus(order, filter){
+    const status = String(order.status || "").toLowerCase();
+    const pay = String(order.paymentStatus || "").toLowerCase();
+    if(status.includes("cancel")) return false;
+    if(filter === "completed") return status.includes("completed");
+    if(filter === "paid-completed") return status.includes("completed") || status.includes("paid") || pay.includes("paid");
+    return true;
+  }
+  function buildMonthlyReport(monthValue, statusFilter){
+    const [yearStr, monthStr] = String(monthValue || currentMonthValue()).split("-");
+    const year = Number(yearStr), month = Number(monthStr) - 1;
+    const allOrders = [...(activeOrdersCache || []), ...(historyOrdersCache || [])];
+    const rowsMap = new Map();
+    let revenue = 0, cost = 0, itemsSold = 0, ordersCount = 0;
+
+    allOrders.forEach(order => {
+      const d = reportOrderDate(order);
+      if(!d || d.getFullYear() !== year || d.getMonth() !== month) return;
+      if(!orderAllowedByReportStatus(order, statusFilter)) return;
+      ordersCount += 1;
+      const orderItems = Array.isArray(order.items) ? order.items : [];
+      const orderRevenue = Number(order.total || order.subtotal || orderItems.reduce((sum,i)=>sum + Number(i.price||0)*Number(i.qty||1), 0));
+      revenue += orderRevenue;
+
+      orderItems.forEach(item => {
+        const itemQty = Number(item.qty || 1);
+        if(isBundleCartItem(item)){
+          (item.bundleItems || []).forEach(component => {
+            const componentQty = itemQty * Number(component.qty || 1);
+            const prod = productByAnyId(component.productId || component.id);
+            const unitCost = Number(component.cost || component.costPrice || productUnitCost(prod));
+            const componentCost = unitCost * componentQty;
+            cost += componentCost;
+            itemsSold += componentQty;
+            const key = (component.productId || component.id || component.name || "Bundle item") + "::" + (component.size || component.variant || "Default");
+            const existing = rowsMap.get(key) || { name:component.name || prod?.name || "Bundle item", variant:component.size || component.variant || "Default", qty:0, revenue:0, cost:0, profit:0 };
+            existing.qty += componentQty;
+            existing.cost += componentCost;
+            rowsMap.set(key, existing);
+          });
+        }else{
+          const prod = productByAnyId(item.productId || item.id);
+          const qty = itemQty;
+          const lineRevenue = Number(item.price || 0) * qty;
+          const unitCost = Number(item.cost || item.costPrice || productUnitCost(prod));
+          const lineCost = unitCost * qty;
+          cost += lineCost;
+          itemsSold += qty;
+          const key = (item.productId || item.id || item.name || "Item") + "::" + (item.size || item.variant || "Default");
+          const existing = rowsMap.get(key) || { name:item.name || prod?.name || "Item", variant:item.size || item.variant || "Default", qty:0, revenue:0, cost:0, profit:0 };
+          existing.qty += qty;
+          existing.revenue += lineRevenue;
+          existing.cost += lineCost;
+          rowsMap.set(key, existing);
+        }
+      });
+    });
+
+    const rows = Array.from(rowsMap.values()).map(r => ({ ...r, profit:Number(r.revenue || 0) - Number(r.cost || 0) })).sort((a,b)=>b.qty-a.qty);
+    // Bundle rows do not have allocated revenue per component. Keep total revenue/profit accurate at summary level.
+    return { monthValue:String(monthValue || currentMonthValue()), ordersCount, itemsSold, revenue, cost, profit:revenue - cost, rows };
+  }
+  function renderMonthlyReport(){
+    const monthEl = $("reportMonth");
+    const filterEl = $("reportStatusFilter");
+    if(monthEl && !monthEl.value) monthEl.value = currentMonthValue();
+    const report = buildMonthlyReport(monthEl?.value || currentMonthValue(), filterEl?.value || "all");
+    lastReportRows = report.rows;
+    if($("reportItemsSold")) $("reportItemsSold").textContent = String(report.itemsSold);
+    if($("reportRevenue")) $("reportRevenue").textContent = money(report.revenue);
+    if($("reportCost")) $("reportCost").textContent = money(report.cost);
+    if($("reportProfit")) $("reportProfit").textContent = money(report.profit);
+    if($("reportSubtitle")) $("reportSubtitle").textContent = `${report.ordersCount} order(s) found for ${report.monthValue}. Profit uses product Cost Price / Capital.`;
+    const tbody = $("reportItemsTable");
+    if(!tbody) return;
+    if(!report.rows.length){ tbody.innerHTML = '<tr><td colspan="6" class="empty">No sales found for this month.</td></tr>'; return; }
+    tbody.innerHTML = report.rows.map(r => `<tr><td><strong>${escapeHtml(r.name)}</strong></td><td>${escapeHtml(r.variant || "Default")}</td><td>${Number(r.qty || 0)}</td><td>${money(r.revenue || 0)}</td><td>${money(r.cost || 0)}</td><td>${money(r.profit || 0)}</td></tr>`).join("");
+  }
+  function exportMonthlyReportCSV(){
+    const month = $("reportMonth")?.value || currentMonthValue();
+    const report = buildMonthlyReport(month, $("reportStatusFilter")?.value || "all");
+    const lines = [
+      ["Month", month],
+      ["Items Sold", report.itemsSold],
+      ["Revenue", report.revenue],
+      ["Cost", report.cost],
+      ["Profit", report.profit],
+      [],
+      ["Item","Variant","Qty Sold","Revenue","Cost","Profit"]
+    ];
+    report.rows.forEach(r => lines.push([r.name, r.variant, r.qty, r.revenue, r.cost, r.profit]));
+    const csv = lines.map(row => row.map(cell => `"${String(cell ?? "").replaceAll('"','""')}"`).join(",")).join("\n");
+    const blob = new Blob([csv], {type:"text/csv;charset=utf-8"});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = `mr-vape-sales-report-${month}.csv`; a.click();
+    URL.revokeObjectURL(url);
+  }
+  function setupReportsAdmin(){
+    if($("reportMonth") && !$("reportMonth").value) $("reportMonth").value = currentMonthValue();
+    if($("generateReportBtn")) $("generateReportBtn").onclick = renderMonthlyReport;
+    if($("exportReportBtn")) $("exportReportBtn").onclick = exportMonthlyReportCSV;
+    if($("reportStatusFilter")) $("reportStatusFilter").onchange = renderMonthlyReport;
+  }
+
   async function setupShippingAdmin(){
     if(!$("shippingZoneRows")) return;
     try{ adminShippingSettings = await loadShippingSettings(); }catch{}
@@ -2198,7 +2327,7 @@ function initAdmin(){
     fillPromoProductSelects();
     if($("tab-promos") && !$("tab-promos").classList.contains("hidden")) loadAdminPromos();
   });
-  subscribeOrders((activeOrders, historyOrders) => renderOrders(activeOrders, historyOrders));
+  subscribeOrders((activeOrders, historyOrders) => { activeOrdersCache = activeOrders || []; historyOrdersCache = historyOrders || []; renderOrders(activeOrdersCache, historyOrdersCache); if($("tab-reports") && !$("tab-reports").classList.contains("hidden")) renderMonthlyReport(); });
   subscribeCustomers((customers) => renderCustomers(customers));
   let __lastAdminMessageCount = 0;
   subscribeMessages((messages) => {
@@ -2210,6 +2339,7 @@ function initAdmin(){
   document.querySelectorAll(".admin-tab-btn").forEach(btn => btn.onclick = () => {
     switchTab(btn.dataset.tab);
     if(btn.dataset.tab === "promos"){ fillPromoProductSelects(); loadAdminPromos(); }
+    if(btn.dataset.tab === "reports"){ renderMonthlyReport(); }
   });
   async function handlePromoFormSave(e){
     if(e) e.preventDefault();
@@ -2259,12 +2389,14 @@ function initAdmin(){
   if($("clearPromoBtn")) $("clearPromoBtn").onclick = clearPromoForm;
   setupBarcodePos();
   setupShippingAdmin();
+  setupReportsAdmin();
   switchTab("products");
   form.onsubmit = async (e) => { e.preventDefault(); const docId = $("docId").value.trim(); const payload = {
       name:$("name").value.trim(),
       brand:$("brand").value.trim(),
       category:$("category").value,
       price:Number($("price").value),
+      costPrice:Number($("costPrice")?.value || 0),
       oldPrice:Number($("oldPrice").value),
       stock:(function(){ const vd = window.getVariantData ? window.getVariantData() : {variantStocks:{}}; const total = sumVariantStocks(vd.variantStocks); return total > 0 ? total : Number($("stock").value); })(),
       sold:$("sold").value.trim() || "0 sold",
