@@ -665,6 +665,94 @@ function initShop(){
     return extraImgs[0] || String(p?.image || "").trim() || imgs[0] || "";
   }
 
+  let cardSliderTimer = null;
+  let galleryState = { images: [], index: 0 };
+
+  function productGalleryImages(p){
+    const extraImgs = productOnlyImages(p);
+    const allImgs = Array.isArray(p?.images) ? p.images.map(x => String(x || "").trim()).filter(Boolean) : [];
+    const variantImgs = [];
+    if(p?.variantImages && typeof p.variantImages === "object"){
+      Object.values(p.variantImages).forEach(img => { if(img) variantImgs.push(String(img).trim()); });
+    }
+    if(Array.isArray(p?.variantPhotoList)){
+      p.variantPhotoList.forEach(v => { if(v?.image) variantImgs.push(String(v.image).trim()); });
+    }
+    return Array.from(new Set(extraImgs.concat(allImgs).concat(variantImgs).concat([String(p?.image || "").trim()]))).filter(Boolean);
+  }
+
+  function startCardImageSystem(){
+    if(cardSliderTimer) clearInterval(cardSliderTimer);
+    cardSliderTimer = setInterval(() => {
+      document.querySelectorAll(".card[data-gallery]").forEach(card => {
+        const imgs = (card.dataset.gallery || "").split("|||").filter(Boolean);
+        if(imgs.length <= 1 || card.matches(":hover")) return;
+        let idx = Number(card.dataset.galleryIndex || 0);
+        idx = (idx + 1) % imgs.length;
+        card.dataset.galleryIndex = String(idx);
+        const img = card.querySelector(".thumb-img");
+        if(img){ img.classList.add("is-changing"); setTimeout(() => { img.src = imgs[idx]; img.classList.remove("is-changing"); }, 90); }
+        card.querySelectorAll(".image-dot").forEach((d,i) => d.classList.toggle("active", i === idx));
+      });
+    }, 2800);
+
+    document.querySelectorAll(".card[data-gallery]").forEach(card => {
+      card.onpointermove = (e) => {
+        const r = card.getBoundingClientRect();
+        const x = (e.clientX - r.left) / r.width - .5;
+        const y = (e.clientY - r.top) / r.height - .5;
+        card.style.setProperty("--tilt-x", (-y * 6).toFixed(2) + "deg");
+        card.style.setProperty("--tilt-y", (x * 6).toFixed(2) + "deg");
+      };
+      card.onpointerleave = () => { card.style.setProperty("--tilt-x", "0deg"); card.style.setProperty("--tilt-y", "0deg"); };
+    });
+  }
+
+  function cycleCardImage(card){
+    const imgs = (card.dataset.gallery || "").split("|||").filter(Boolean);
+    if(imgs.length <= 1) return;
+    let idx = (Number(card.dataset.galleryIndex || 0) + 1) % imgs.length;
+    card.dataset.galleryIndex = String(idx);
+    const img = card.querySelector(".thumb-img");
+    if(img) img.src = imgs[idx];
+    card.querySelectorAll(".image-dot").forEach((d,i) => d.classList.toggle("active", i === idx));
+  }
+
+  function openUltraGallery(images, startIndex=0){
+    const modal = $("ultraGalleryModal");
+    const img = $("ultraGalleryImage");
+    const count = $("ultraGalleryCount");
+    if(!modal || !img || !images.length) return;
+    galleryState.images = images;
+    galleryState.index = Math.max(0, Math.min(startIndex, images.length - 1));
+    img.src = images[galleryState.index];
+    count.textContent = (galleryState.index + 1) + " / " + images.length;
+    modal.classList.remove("hidden");
+  }
+
+  function moveUltraGallery(step){
+    if(!galleryState.images.length) return;
+    galleryState.index = (galleryState.index + step + galleryState.images.length) % galleryState.images.length;
+    $("ultraGalleryImage").src = galleryState.images[galleryState.index];
+    $("ultraGalleryCount").textContent = (galleryState.index + 1) + " / " + galleryState.images.length;
+  }
+
+  function closeUltraGallery(){
+    const modal = $("ultraGalleryModal");
+    if(modal) modal.classList.add("hidden");
+  }
+
+  function bindUltraGalleryControls(){
+    const ultraCloseBtn = $("ultraGalleryClose");
+    const ultraPrevBtn = $("ultraGalleryPrev");
+    const ultraNextBtn = $("ultraGalleryNext");
+    if(ultraCloseBtn) ultraCloseBtn.onclick = closeUltraGallery;
+    if(ultraPrevBtn) ultraPrevBtn.onclick = () => moveUltraGallery(-1);
+    if(ultraNextBtn) ultraNextBtn.onclick = () => moveUltraGallery(1);
+    const ultraModal = $("ultraGalleryModal");
+    if(ultraModal) ultraModal.onclick = (e) => { if(e.target === ultraModal) closeUltraGallery(); };
+  }
+
   function renderProducts(){
     const q = (searchInput.value || "").trim().toLowerCase();
     const filtered = products.filter(p => {
@@ -679,12 +767,17 @@ function initShop(){
     }
 
     gridEl.innerHTML = filtered.map(p => {
-      const cardImage = firstProductImage(p);
+      const gallery = productGalleryImages(p);
+      const cardImage = gallery[0] || firstProductImage(p);
       const safeImage = escapeHtml(cardImage);
+      const galleryData = escapeHtml(gallery.join("|||"));
+      const dots = gallery.length > 1 ? `<div class="image-dots">${gallery.slice(0,5).map((_,i)=>`<span class="image-dot ${i===0?"active":""}"></span>`).join("")}</div>` : "";
       return `
-      <article class="card" data-view="${p.id}">
-        <div class="thumb ${cardImage ? "has-image" : "no-image"}">
-          ${cardImage ? `<img class="thumb-img" src="${safeImage}" alt="${escapeHtml((p.brand || "") + " " + (p.name || "Product"))}" loading="lazy" onerror="this.closest('.thumb').classList.add('no-image');this.remove();">` : `<div class="thumb-placeholder">MR VAPE SHOP</div>`}
+      <article class="card ultra-card" data-view="${p.id}" data-gallery="${galleryData}" data-gallery-index="0">
+        <div class="thumb ${cardImage ? "has-image" : "no-image"}" data-card-image>
+          ${cardImage ? `<img class="thumb-img" src="${safeImage}" alt="${escapeHtml((p.brand || "") + " " + (p.name || "Product"))}" loading="lazy" decoding="async" onerror="this.closest('.thumb').classList.add('no-image');this.remove();">` : `<div class="thumb-placeholder">MR VAPE SHOP</div>`}
+          ${dots}
+          <div class="quick-view-pill">Tap image to preview</div>
           <div class="badge">${escapeHtml(p.badge || "New")}</div>
           <button class="fav js-notice" data-text="Wishlist feature can be added next">♡</button>
         </div>
@@ -723,6 +816,18 @@ function initShop(){
         quickAdd(btn.dataset.quickAdd);
       };
     });
+
+    gridEl.querySelectorAll("[data-card-image]").forEach(thumb => {
+      thumb.onclick = (e) => {
+        e.stopPropagation();
+        const card = thumb.closest(".card");
+        const gallery = (card?.dataset.gallery || "").split("|||").filter(Boolean);
+        if(gallery.length > 1) openUltraGallery(gallery, Number(card.dataset.galleryIndex || 0));
+        else if(card) openProductPage(card.dataset.view);
+      };
+      thumb.oncontextmenu = (e) => { e.preventDefault(); const card = thumb.closest(".card"); if(card) cycleCardImage(card); };
+    });
+    startCardImageSystem();
   }
 
   function quickAdd(id){
@@ -797,6 +902,7 @@ function initShop(){
     const productImages = (productOnlyImages(p).length ? productOnlyImages(p) : [firstProductImage(p)]).map(x => String(x || "").trim()).filter(Boolean);
     const galleryImages = Array.from(new Set(productImages.concat(variantGalleryImages))).filter(Boolean);
     $("productPageMainImage").src = galleryImages[0] || firstProductImage(p);
+    $("productPageMainImage").onclick = () => openUltraGallery(galleryImages, 0);
     $("productPageBadge").textContent = p.badge || "New";
     const productThumbs = $("productThumbs");
     if(productThumbs){
@@ -1333,6 +1439,15 @@ function initShop(){
   });
 
   loadShippingSettings().then(settings => { shippingSettings = settings; renderCart(); }).catch(() => renderCart());
+
+  bindUltraGalleryControls();
+  document.addEventListener("keydown", (e) => {
+    const modal = $("ultraGalleryModal");
+    if(!modal || modal.classList.contains("hidden")) return;
+    if(e.key === "Escape") closeUltraGallery();
+    if(e.key === "ArrowLeft") moveUltraGallery(-1);
+    if(e.key === "ArrowRight") moveUltraGallery(1);
+  });
 
   renderChips();
   renderCart();
