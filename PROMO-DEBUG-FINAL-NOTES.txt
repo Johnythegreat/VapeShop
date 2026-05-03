@@ -1,0 +1,17 @@
+PROMO DEBUG FINAL FIX
+
+Fixed the admin promo list not displaying:
+- Added cache-busting app-v4.js so GitHub Pages/browser does not keep old broken JS.
+- Promo save now saves to local storage first so the Promo List appears instantly.
+- Firebase sync still runs after local save.
+- Promo form uses safe default values and novalidate so browser validation cannot block saving.
+- Promo List reloads immediately after Save Promo.
+- Customer page now imports the same fixed app-v4.js.
+
+After upload:
+1. Open admin.html
+2. Hard refresh Ctrl+F5
+3. Click Promos
+4. Click Save Promo
+5. Promo List should show the saved V2 + V3 bundle
+6. Open customer page and tap 🔥 Promos
