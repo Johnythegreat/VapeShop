@@ -1,0 +1,20 @@
+SALES CHARTS + RECEIPT PRINTER PRO UPGRADE
+
+Added:
+1. Admin Reports charts
+   - Revenue / Cost / Profit bar chart
+   - Top Items Sold chart
+   - Uses the selected month and status filter
+   - No external library required
+
+2. POS Receipt Pro
+   - Cleaner thermal receipt layout
+   - 58mm / 80mm printer switch
+   - Better item/variant display
+   - Bundle item breakdown in receipt
+   - Cash received and change display
+   - Receipt number, order ID, cashier, customer, phone, delivery type
+   - Auto print popup retained
+
+Debug:
+- app-v4.js passed node --check syntax validation.

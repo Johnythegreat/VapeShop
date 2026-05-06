@@ -266,6 +266,24 @@
           <div class="stat-card"><span>Profit</span><strong id="reportProfit">₱0</strong></div>
         </section>
 
+
+        <section class="panel report-chart-panel">
+          <div class="panel-head">
+            <h2>Sales Charts</h2>
+            <p>Visual graph of revenue, cost, profit, and best-selling variants for the selected month.</p>
+          </div>
+          <div class="report-chart-grid">
+            <div class="chart-card">
+              <div class="chart-title">Revenue / Cost / Profit</div>
+              <canvas id="reportMoneyChart" width="520" height="260"></canvas>
+            </div>
+            <div class="chart-card">
+              <div class="chart-title">Top Items Sold</div>
+              <canvas id="reportTopItemsChart" width="520" height="260"></canvas>
+            </div>
+          </div>
+        </section>
+
         <section class="panel">
           <div class="panel-head">
             <h2>Top Sold Items</h2>

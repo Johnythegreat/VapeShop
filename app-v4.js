@@ -1973,26 +1973,34 @@ function initAdmin(){
     const total = Number(order.total || subtotal + shipping || 0);
     const cashReceived = Number(order.cashReceived || 0);
     const change = Math.max(0, Number(order.change || (cashReceived ? cashReceived - total : 0)));
-    const dateText = order.paidAt && typeof order.paidAt === "string" ? new Date(order.paidAt).toLocaleString() : new Date().toLocaleString();
+    const dateSource = order.paidAt || order.completedAt || order.createdAt || new Date().toISOString();
+    const dateText = toDateSafe(dateSource)?.toLocaleString() || new Date().toLocaleString();
     const receiptNo = receiptNumber(order);
-    const rowsHtml = items.map((item, index) => `
-      <tr>
+    const safeMoney = (v) => money(Number(v || 0));
+    const rowsHtml = items.map((item, index) => {
+      const qty = Number(item.qty || 0);
+      const price = Number(item.price || 0);
+      const variant = item.size || item.variant || item.flavor || "Default";
+      const bundleNote = isBundleCartItem(item) && Array.isArray(item.bundleItems)
+        ? `<div class="bundle-lines">${item.bundleItems.map(b => `${escapeHtml(b.name || "Bundle item")} - ${escapeHtml(b.size || b.variant || "Default")}`).join("<br>")}</div>`
+        : "";
+      return `<tr>
         <td class="num">${index + 1}</td>
-        <td class="item-name">${escapeHtml(item.name || "Item")}<br><span>${escapeHtml(item.size || item.variant || "Default")}</span></td>
-        <td class="qty">${Number(item.qty || 0)}</td>
-        <td class="money-cell">${money(item.price || 0)}</td>
-        <td class="money-cell">${money(Number(item.price || 0) * Number(item.qty || 0))}</td>
-      </tr>
-    `).join("");
+        <td class="item-name"><strong>${escapeHtml(item.name || "Item")}</strong><br><span>${escapeHtml(variant)}</span>${bundleNote}</td>
+        <td class="qty">${qty}</td>
+        <td class="money-cell">${safeMoney(price)}</td>
+        <td class="money-cell"><strong>${safeMoney(price * qty)}</strong></td>
+      </tr>`;
+    }).join("");
     const html = `<!doctype html><html><head><title>Receipt ${escapeHtml(receiptNo)}</title><meta name="viewport" content="width=device-width,initial-scale=1"><style>
-      :root{--paper:80mm}*{box-sizing:border-box}body{font-family:Arial,Helvetica,sans-serif;margin:0;color:#111;background:#f3f4f6}.toolbar{position:sticky;top:0;background:#0b1220;color:white;padding:10px;display:flex;gap:8px;justify-content:center;flex-wrap:wrap}.toolbar button{border:0;border-radius:10px;padding:10px 12px;font-weight:800;cursor:pointer}.toolbar .primary{background:#111827;color:#fff;border:1px solid #374151}.toolbar .light{background:#fff;color:#111}.receipt{width:var(--paper);max-width:100%;margin:14px auto;background:#fff;padding:12px 10px;box-shadow:0 10px 30px rgba(0,0,0,.18)}.center{text-align:center}.shop{font-size:18px;font-weight:900;letter-spacing:.5px}.tag{font-size:11px;text-transform:uppercase;letter-spacing:1.2px}.muted{font-size:11px;color:#444;line-height:1.45}.paid{font-size:13px;font-weight:900;border:2px solid #111;display:inline-block;padding:5px 16px;margin:8px 0 2px;border-radius:999px}hr{border:0;border-top:1px dashed #777;margin:10px 0}table{width:100%;border-collapse:collapse;font-size:11px}th{font-size:10px;text-transform:uppercase;text-align:left;border-bottom:1px solid #111;padding:4px 0}td{padding:5px 0;border-bottom:1px dashed #ddd;vertical-align:top}.num{width:14px}.qty{text-align:center;width:22px}.money-cell{text-align:right;white-space:nowrap}.item-name span{font-size:10px;color:#555}.summary td{border:0;padding:3px 0}.summary .grand td{font-size:15px;font-weight:900;border-top:1px dashed #777;padding-top:7px}.barcode{font-family:"Courier New",monospace;font-size:12px;letter-spacing:2px;border:1px solid #111;padding:6px;margin:8px 0 2px;word-break:break-all}.footer{font-size:11px;line-height:1.5}.copy{font-size:10px;color:#666}@page{size:80mm auto;margin:4mm}@media print{body{background:#fff}.toolbar{display:none}.receipt{width:80mm;margin:0;box-shadow:none;padding:0 2mm}body.print-58 .receipt{width:58mm}@page{margin:2mm}}
+      :root{--paper:80mm;--ink:#111;--muted:#555;--line:#222}*{box-sizing:border-box}body{font-family:Arial,Helvetica,sans-serif;margin:0;color:var(--ink);background:#edf0f5}.toolbar{position:sticky;top:0;background:#0b1220;color:white;padding:10px;display:flex;gap:8px;justify-content:center;flex-wrap:wrap}.toolbar button{border:0;border-radius:10px;padding:10px 12px;font-weight:900;cursor:pointer}.toolbar .primary{background:#11c5f5;color:#06121f}.toolbar .light{background:#fff;color:#111}.receipt{width:var(--paper);max-width:100%;margin:14px auto;background:#fff;padding:12px 10px;box-shadow:0 18px 45px rgba(0,0,0,.20)}.center{text-align:center}.brand-row{display:flex;align-items:center;justify-content:center;gap:7px}.logo-dot{width:24px;height:24px;border:2px solid #111;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:12px;font-weight:900}.shop{font-size:19px;font-weight:1000;letter-spacing:.7px}.tag{font-size:10px;text-transform:uppercase;letter-spacing:1.4px;color:#333}.paid{font-size:12px;font-weight:1000;border:2px solid #111;display:inline-block;padding:5px 18px;margin:7px 0 2px;border-radius:999px}.meta{font-size:11px;line-height:1.55}.meta-grid{display:grid;grid-template-columns:1fr;gap:1px}.meta b{font-weight:900}.muted{font-size:11px;color:var(--muted);line-height:1.45}hr{border:0;border-top:1px dashed #777;margin:9px 0}table{width:100%;border-collapse:collapse;font-size:11px}th{font-size:9px;text-transform:uppercase;text-align:left;border-bottom:1px solid #111;padding:4px 0}td{padding:5px 0;border-bottom:1px dashed #ddd;vertical-align:top}.num{width:14px}.qty{text-align:center;width:24px}.money-cell{text-align:right;white-space:nowrap}.item-name strong{font-size:11px}.item-name span{font-size:10px;color:#555}.bundle-lines{font-size:9px;color:#555;margin-top:2px;line-height:1.35}.summary td{border:0;padding:3px 0}.summary .grand td{font-size:16px;font-weight:1000;border-top:1px dashed #777;padding-top:7px}.summary .label{font-weight:800}.barcode{font-family:"Courier New",monospace;font-size:12px;letter-spacing:2px;border:1px solid #111;padding:6px;margin:8px 0 2px;word-break:break-all}.policy{border:1px dashed #999;border-radius:8px;padding:6px;margin-top:8px;font-size:10px;line-height:1.35}.footer{font-size:11px;line-height:1.5;font-weight:800}.copy{font-size:10px;color:#666}.cut{font-size:10px;color:#888;letter-spacing:3px;margin-top:6px}@page{size:80mm auto;margin:3mm}@media print{body{background:#fff}.toolbar{display:none}.receipt{width:80mm;margin:0;box-shadow:none;padding:0 1.5mm}body.print-58 .receipt{width:58mm;font-size:10px}body.print-58 .shop{font-size:15px}body.print-58 table{font-size:9px}body.print-58 th{font-size:8px}body.print-58 .meta,body.print-58 .muted{font-size:9px}@page{margin:2mm}}
     </style></head><body><div class="toolbar no-print"><button class="primary" onclick="window.print()">🧾 Print Receipt</button><button class="light" onclick="document.body.classList.toggle('print-58');document.documentElement.style.setProperty('--paper',document.body.classList.contains('print-58')?'58mm':'80mm')">58mm / 80mm</button><button class="light" onclick="window.close()">Close</button></div><div class="receipt">
-      <div class="center"><div class="shop">MR VAPE SHOP</div><div class="tag">Official POS Receipt</div><div class="paid">PAID</div></div><hr>
-      <div class="muted"><strong>Receipt No:</strong> ${escapeHtml(receiptNo)}<br><strong>Order ID:</strong> ${escapeHtml(order.id || "-")}<br><strong>Date:</strong> ${escapeHtml(dateText)}<br><strong>Cashier:</strong> ${escapeHtml(order.cashier || "Admin POS")}<br><strong>Customer:</strong> ${escapeHtml(order.customer?.name || "Walk-in Customer")}<br><strong>Phone:</strong> ${escapeHtml(order.customer?.phone || "-")}<br><strong>Delivery:</strong> ${escapeHtml(order.shippingZone || (shipping ? "Delivery" : "Walk-in / Pickup"))}</div><hr>
-      <table><thead><tr><th>#</th><th>Item</th><th>Qty</th><th style="text-align:right">Price</th><th style="text-align:right">Total</th></tr></thead><tbody>${rowsHtml}</tbody></table><hr>
-      <table class="summary"><tr><td>Subtotal</td><td class="money-cell">${money(subtotal)}</td></tr><tr><td>Shipping/Fee</td><td class="money-cell">${money(shipping)}</td></tr><tr><td>Payment</td><td class="money-cell">${escapeHtml(order.paymentMethod || "Cash")}</td></tr>${cashReceived ? `<tr><td>Cash Received</td><td class="money-cell">${money(cashReceived)}</td></tr><tr><td>Change</td><td class="money-cell">${money(change)}</td></tr>` : ""}<tr class="grand"><td>TOTAL</td><td class="money-cell">${money(total)}</td></tr></table>
-      <hr><div class="center"><div class="barcode">*${escapeHtml(receiptNo)}*</div><div class="footer">Thank you for shopping with us!<br>Please keep this receipt for reference.</div><div class="copy">Powered by MR VAPE SHOP POS</div></div>
-    </div><script>window.onload=function(){setTimeout(function(){window.print()},500)}<\/script></body></html>`;
+      <div class="center"><div class="brand-row"><span class="logo-dot">MV</span><div class="shop">MR VAPE SHOP</div></div><div class="tag">POS Official Receipt</div><div class="paid">PAID</div></div><hr>
+      <div class="meta"><div class="meta-grid"><div><b>Receipt:</b> ${escapeHtml(receiptNo)}</div><div><b>Date:</b> ${escapeHtml(dateText)}</div><div><b>Cashier:</b> ${escapeHtml(order.cashier || "Admin POS")}</div><div><b>Customer:</b> ${escapeHtml(order.customer?.name || "Walk-in Customer")}</div><div><b>Phone:</b> ${escapeHtml(order.customer?.phone || "-")}</div><div><b>Order:</b> ${escapeHtml(order.id || receiptNo)}</div><div><b>Type:</b> ${escapeHtml(order.shippingZone || (shipping ? "Delivery" : "Store Pickup / POS"))}</div></div></div><hr>
+      <table><thead><tr><th>#</th><th>Item</th><th>Qty</th><th style="text-align:right">Price</th><th style="text-align:right">Total</th></tr></thead><tbody>${rowsHtml || '<tr><td colspan="5" class="center muted">No items</td></tr>'}</tbody></table><hr>
+      <table class="summary"><tr><td class="label">Subtotal</td><td class="money-cell">${safeMoney(subtotal)}</td></tr><tr><td class="label">Delivery/Fee</td><td class="money-cell">${safeMoney(shipping)}</td></tr><tr><td class="label">Payment</td><td class="money-cell">${escapeHtml(order.paymentMethod || "Cash")}</td></tr>${cashReceived ? `<tr><td class="label">Cash Received</td><td class="money-cell">${safeMoney(cashReceived)}</td></tr><tr><td class="label">Change</td><td class="money-cell">${safeMoney(change)}</td></tr>` : ""}<tr class="grand"><td>TOTAL</td><td class="money-cell">${safeMoney(total)}</td></tr></table>
+      <hr><div class="center"><div class="barcode">*${escapeHtml(receiptNo)}*</div><div class="policy">Keep this receipt for order reference. For warranty or return concerns, present this receipt with the item.</div><div class="footer">Thank you for shopping with us!</div><div class="copy">Powered by MR VAPE SHOP POS</div><div class="cut">✂ - - - - - - - - - - - - - - -</div></div>
+    </div><script>window.onload=function(){setTimeout(function(){window.print()},450)}<\/script></body></html>`;
     const win = window.open("", "_blank", "width=430,height=760");
     if(!win){ showNotice("Popup blocked. Allow popups to print receipt."); return; }
     win.document.open(); win.document.write(html); win.document.close();
@@ -2161,6 +2169,114 @@ function initAdmin(){
     // Bundle rows do not have allocated revenue per component. Keep total revenue/profit accurate at summary level.
     return { monthValue:String(monthValue || currentMonthValue()), ordersCount, itemsSold, revenue, cost, profit:revenue - cost, rows };
   }
+
+  function resizeCanvasForChart(canvas){
+    if(!canvas) return null;
+    const rect = canvas.getBoundingClientRect();
+    const dpr = window.devicePixelRatio || 1;
+    const width = Math.max(320, Math.floor(rect.width || canvas.clientWidth || canvas.width || 520));
+    const height = Math.max(220, Math.floor(rect.height || 260));
+    canvas.width = Math.floor(width * dpr);
+    canvas.height = Math.floor(height * dpr);
+    const ctx = canvas.getContext("2d");
+    ctx.setTransform(dpr,0,0,dpr,0,0);
+    return {ctx,width,height};
+  }
+  function drawEmptyChart(canvas, text){
+    const setup = resizeCanvasForChart(canvas); if(!setup) return;
+    const {ctx,width,height} = setup;
+    ctx.clearRect(0,0,width,height);
+    ctx.fillStyle = "rgba(255,255,255,.78)";
+    ctx.font = "800 15px Arial";
+    ctx.textAlign = "center";
+    ctx.fillText(text || "No data yet", width/2, height/2);
+  }
+  function drawMoneyChart(report){
+    const canvas = $("reportMoneyChart"); if(!canvas) return;
+    const setup = resizeCanvasForChart(canvas); if(!setup) return;
+    const {ctx,width,height} = setup;
+    ctx.clearRect(0,0,width,height);
+    const pad = 38, bottom = 44, top = 20;
+    const values = [Number(report.revenue||0), Number(report.cost||0), Number(report.profit||0)];
+    const labels = ["Revenue", "Cost", "Profit"];
+    const max = Math.max(...values, 1);
+    ctx.strokeStyle = "rgba(255,255,255,.10)";
+    ctx.lineWidth = 1;
+    for(let i=0;i<4;i++){
+      const y = top + (height-top-bottom) * i/3;
+      ctx.beginPath(); ctx.moveTo(pad,y); ctx.lineTo(width-18,y); ctx.stroke();
+    }
+    const chartW = width - pad - 22;
+    const barW = Math.min(90, chartW / 5);
+    values.forEach((v,i)=>{
+      const x = pad + chartW * (i + .5) / 3 - barW/2;
+      const h = (height-top-bottom) * (v / max);
+      const y = height - bottom - h;
+      const grad = ctx.createLinearGradient(0,y,0,height-bottom);
+      grad.addColorStop(0, i===0 ? "#20d7ff" : i===1 ? "#a78bfa" : "#46f7a5");
+      grad.addColorStop(1, i===0 ? "#7c5cff" : i===1 ? "#5b3df5" : "#0ea86f");
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      const r=12;
+      ctx.moveTo(x+r,y); ctx.lineTo(x+barW-r,y); ctx.quadraticCurveTo(x+barW,y,x+barW,y+r);
+      ctx.lineTo(x+barW,height-bottom); ctx.lineTo(x,height-bottom); ctx.lineTo(x,y+r); ctx.quadraticCurveTo(x,y,x+r,y);
+      ctx.fill();
+      ctx.fillStyle = "rgba(255,255,255,.92)";
+      ctx.font = "900 12px Arial";
+      ctx.textAlign = "center";
+      ctx.fillText(money(v), x+barW/2, Math.max(14, y-7));
+      ctx.fillStyle = "rgba(255,255,255,.72)";
+      ctx.font = "800 12px Arial";
+      ctx.fillText(labels[i], x+barW/2, height-18);
+    });
+  }
+  function drawTopItemsChart(report){
+    const canvas = $("reportTopItemsChart"); if(!canvas) return;
+    const rows = (report.rows || []).slice(0,6);
+    if(!rows.length){ drawEmptyChart(canvas, "No sold items this month"); return; }
+    const setup = resizeCanvasForChart(canvas); if(!setup) return;
+    const {ctx,width,height} = setup;
+    ctx.clearRect(0,0,width,height);
+    const padL = 116, padR = 24, top = 20, rowH = Math.max(28, (height - top - 20) / rows.length);
+    const max = Math.max(...rows.map(r=>Number(r.qty||0)),1);
+    ctx.font = "800 11px Arial";
+    rows.forEach((r,i)=>{
+      const y = top + i*rowH + 5;
+      const barH = Math.min(20, rowH-8);
+      const w = (width - padL - padR) * Number(r.qty||0) / max;
+      ctx.fillStyle = "rgba(255,255,255,.82)";
+      ctx.textAlign = "right";
+      const label = String(r.name || "Item").slice(0,14);
+      ctx.fillText(label, padL-10, y+barH-5);
+      const grad = ctx.createLinearGradient(padL,y,padL+w,y);
+      grad.addColorStop(0,"#20d7ff"); grad.addColorStop(1,"#8b5cf6");
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      const rr=10;
+      ctx.moveTo(padL+rr,y); ctx.lineTo(padL+w-rr,y); ctx.quadraticCurveTo(padL+w,y,padL+w,y+rr);
+      ctx.lineTo(padL+w,y+barH-rr); ctx.quadraticCurveTo(padL+w,y+barH,padL+w-rr,y+barH);
+      ctx.lineTo(padL+rr,y+barH); ctx.quadraticCurveTo(padL,y+barH,padL,y+barH-rr);
+      ctx.lineTo(padL,y+rr); ctx.quadraticCurveTo(padL,y,padL+rr,y);
+      ctx.fill();
+      ctx.fillStyle = "rgba(255,255,255,.95)";
+      ctx.textAlign = "left";
+      ctx.font = "900 12px Arial";
+      ctx.fillText(String(Number(r.qty||0)), padL + w + 8, y+barH-5);
+      ctx.font = "800 10px Arial";
+      ctx.fillStyle = "rgba(255,255,255,.55)";
+      ctx.fillText(String(r.variant || "Default").slice(0,22), padL, y+barH+12);
+    });
+  }
+  function renderSalesCharts(report){
+    if(!report || !report.ordersCount){
+      drawEmptyChart($("reportMoneyChart"), "No sales found");
+      drawEmptyChart($("reportTopItemsChart"), "No sold items found");
+      return;
+    }
+    drawMoneyChart(report);
+    drawTopItemsChart(report);
+  }
+
   function renderMonthlyReport(){
     const monthEl = $("reportMonth");
     const filterEl = $("reportStatusFilter");
@@ -2171,6 +2287,7 @@ function initAdmin(){
     if($("reportRevenue")) $("reportRevenue").textContent = money(report.revenue);
     if($("reportCost")) $("reportCost").textContent = money(report.cost);
     if($("reportProfit")) $("reportProfit").textContent = money(report.profit);
+    renderSalesCharts(report);
     if($("reportSubtitle")) $("reportSubtitle").textContent = `${report.ordersCount} order(s) found for ${report.monthValue}. Profit uses product Cost Price / Capital.`;
     const tbody = $("reportItemsTable");
     if(!tbody) return;
