@@ -1407,3 +1407,15 @@ body.drawer-open .bottom-nav{ z-index: 35 !important; }
 .chart-title{font-weight:900;margin-bottom:10px;color:var(--text)}
 .chart-card canvas{width:100%;height:260px;display:block;border-radius:14px;background:linear-gradient(180deg,rgba(125,249,255,.04),rgba(139,92,246,.04))}
 @media(max-width:900px){.report-chart-grid{grid-template-columns:1fr}.chart-card{min-height:280px}}
+
+
+/* === Variant Barcode Scanner POS Upgrade === */
+.barcode-pos-actions{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:10px 0 12px}
+.scanner-modal{position:fixed;inset:0;background:rgba(2,6,23,.82);z-index:9999;display:grid;place-items:center;padding:18px;backdrop-filter:blur(8px)}
+.scanner-modal.hidden{display:none!important}
+.scanner-box{width:min(520px,96vw);background:#07111f;border:1px solid rgba(125,249,255,.25);border-radius:24px;padding:18px;box-shadow:0 30px 90px rgba(0,0,0,.55)}
+.scanner-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:12px}
+.scanner-head h3{margin:0;color:#f8fbff}.scanner-head p{margin:4px 0 0;color:#94a3b8;font-size:13px}
+#barcodeReader{overflow:hidden;border-radius:18px;background:#020617;min-height:260px;border:1px solid rgba(255,255,255,.12)}
+.variant-row.variant-photo-row{grid-template-columns:1.1fr .45fr .9fr 1.2fr auto auto}
+@media(max-width:900px){.variant-row.variant-photo-row{grid-template-columns:1fr}.barcode-pos-actions{align-items:stretch}.barcode-pos-actions .btn{width:100%}}

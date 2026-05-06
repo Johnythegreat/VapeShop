@@ -142,6 +142,28 @@ const getVariantStock = (p, variant) => {
   if(variant && Object.prototype.hasOwnProperty.call(map, variant)) return Number(map[variant] || 0);
   return Number(p?.stock || 0);
 };
+const variantBarcodeMap = (p) => (p && p.variantBarcodes && typeof p.variantBarcodes === "object") ? p.variantBarcodes : {};
+const getVariantBarcode = (p, variant) => String(variantBarcodeMap(p)[variant] || "").trim();
+function findProductByVariantBarcode(list, barcode){
+  const code = String(barcode || "").trim().toLowerCase();
+  if(!code) return null;
+  for(const product of (list || [])){
+    const productCodes = [product?.barcode, product?.sku, product?.id, product?.docId, product?.firestoreId, product?._docId]
+      .map(v => String(v || "").trim().toLowerCase()).filter(Boolean);
+    if(productCodes.includes(code)) return { product, variant:null, barcodeType:"product" };
+    const map = variantBarcodeMap(product);
+    for(const [variant, value] of Object.entries(map)){
+      if(String(value || "").trim().toLowerCase() === code) return { product, variant, barcodeType:"variant" };
+    }
+    if(Array.isArray(product?.variantPhotoList)){
+      for(const row of product.variantPhotoList){
+        if(String(row?.barcode || "").trim().toLowerCase() === code) return { product, variant:row.name || row.variant || null, barcodeType:"variant" };
+      }
+    }
+  }
+  return null;
+}
+
 const sumVariantStocks = (map) => Object.values(map || {}).reduce((sum, value) => sum + Number(value || 0), 0);
 
 const isBundleCartItem = (item) => item && item.type === "bundle" && Array.isArray(item.bundleItems);
@@ -1850,7 +1872,8 @@ async function createPosSale(cart, account={}, payment={}){
     productId:item.productId || item.id,
     productDocId:item.productDocId || item.docId || item.firestoreId || item.id,
     size:item.size || item.variant || "Default",
-    image:item.image || ""
+    image:item.image || "",
+    barcode:item.barcode || ""
   }));
   const total = totalAmount(cleanItems, 0);
   const orderPayload = {
@@ -2434,24 +2457,31 @@ function initAdmin(){
   function switchTab(tabName){ document.querySelectorAll(".admin-tab-panel").forEach(panel => panel.classList.add("hidden")); const target = $("tab-"+tabName); if(target) target.classList.remove("hidden"); document.querySelectorAll(".admin-tab-btn").forEach(btn => btn.classList.toggle("active", btn.dataset.tab===tabName)); }
 
   function posProductCode(product){ return String(product.barcode || product.sku || product.id || ""); }
-  function selectPosProduct(product){
+  function selectPosProduct(product, preferredVariant=""){
     selectedPosProduct = product || null;
     const box = $("posSelectedBox"), variantSelect = $("posVariantSelect");
     if(!box || !variantSelect) return;
     if(!product){ box.textContent = "No product selected."; variantSelect.innerHTML = ""; return; }
     const variants = Array.isArray(product.variants) && product.variants.length ? product.variants : ["Default"];
-    variantSelect.innerHTML = variants.map(v => `<option value="${escapeHtml(v)}">${escapeHtml(v)} - Stock: ${getVariantStock(product, v)}</option>`).join("");
+    variantSelect.innerHTML = variants.map(v => `<option value="${escapeHtml(v)}">${escapeHtml(v)} - Stock: ${getVariantStock(product, v)}${getVariantBarcode(product, v) ? " • " + escapeHtml(getVariantBarcode(product, v)) : ""}</option>`).join("");
+    if(preferredVariant && variants.includes(preferredVariant)) variantSelect.value = preferredVariant;
     box.innerHTML = `<strong>${escapeHtml(product.name)}</strong><span>${money(product.price)} • Code: ${escapeHtml(posProductCode(product))}</span>`;
   }
   function renderPosSearch(term=""){
     const results = $("posSearchResults"); if(!results) return;
     const q = String(term || "").trim().toLowerCase();
-    const list = (q ? adminProductsCache.filter(p => [p.id,p.name,p.brand,p.category,p.barcode,p.sku].some(v => String(v || "").toLowerCase().includes(q))) : adminProductsCache.slice(0,8)).slice(0,8);
+    const list = (q ? adminProductsCache.filter(p => [p.id,p.name,p.brand,p.category,p.barcode,p.sku, ...Object.values(variantBarcodeMap(p))].some(v => String(v || "").toLowerCase().includes(q))) : adminProductsCache.slice(0,8)).slice(0,8);
     if(!list.length){ results.innerHTML = '<div class="empty mini">No product found.</div>'; return; }
     results.innerHTML = list.map(p => `<button type="button" class="pos-result" data-pos-pick="${escapeHtml(p.id)}"><span><strong>${escapeHtml(p.name)}</strong><small>${escapeHtml(p.brand || p.category || "")} • Stock ${Number(p.stock||0)}</small></span><b>${money(p.price)}</b></button>`).join("");
     results.querySelectorAll('[data-pos-pick]').forEach(btn => btn.onclick = () => selectPosProduct(adminProductsCache.find(p => p.id === btn.dataset.posPick)));
-    const exact = q && adminProductsCache.find(p => String(p.id).toLowerCase() === q || String(p.barcode || "").toLowerCase() === q || String(p.sku || "").toLowerCase() === q);
-    if(exact) selectPosProduct(exact);
+    const exactScan = q ? findProductByVariantBarcode(adminProductsCache, q) : null;
+    if(exactScan){
+      selectPosProduct(exactScan.product, exactScan.variant || null);
+      if(exactScan.variant){
+        addSelectedPosToCart(1, true);
+        if(window.playBarcodeBeep) window.playBarcodeBeep();
+      }
+    }
   }
   function renderPosCart(){
     const view = $("posCartView"), count = $("posCartCount"), totalEl = $("posTotal"), changeEl = $("posChange");
@@ -2465,22 +2495,96 @@ function initAdmin(){
     view.innerHTML = posCart.map((item, idx) => `<div class="pos-cart-item"><div><strong>${escapeHtml(item.name)}</strong><small>${escapeHtml(item.size || "Default")} • ${money(item.price)} x ${Number(item.qty)}</small></div><div><b>${money(Number(item.price)*Number(item.qty))}</b><button type="button" data-pos-remove="${idx}">×</button></div></div>`).join("");
     view.querySelectorAll('[data-pos-remove]').forEach(btn => btn.onclick = () => { posCart.splice(Number(btn.dataset.posRemove), 1); renderPosCart(); });
   }
+  function addSelectedPosToCart(qtyOverride, silent=false){
+    if(!selectedPosProduct){ if(!silent) showNotice("Select a product first"); return false; }
+    const variant = $("posVariantSelect")?.value || "Default";
+    const qty = Math.max(1, Number(qtyOverride || $("posQty")?.value || 1));
+    const available = getVariantStock(selectedPosProduct, variant);
+    const existingQty = posCart.filter(i => i.id === selectedPosProduct.id && i.size === variant).reduce((a,b)=>a+Number(b.qty||0),0);
+    if(available < existingQty + qty){ showNotice("Not enough stock for " + variant); return false; }
+    const existing = posCart.find(i => i.id === selectedPosProduct.id && i.size === variant);
+    if(existing) existing.qty = Number(existing.qty) + qty;
+    else posCart.push({ id:selectedPosProduct.id, productId:selectedPosProduct.id, productDocId:selectedPosProduct.docId || selectedPosProduct.firestoreId || selectedPosProduct.id, name:selectedPosProduct.name, price:Number(selectedPosProduct.price || 0), cost:Number(selectedPosProduct.costPrice || selectedPosProduct.cost || 0), qty, size:variant, barcode:getVariantBarcode(selectedPosProduct, variant) || selectedPosProduct.barcode || "", image:(selectedPosProduct.variantImages && selectedPosProduct.variantImages[variant]) || firstProductImage(selectedPosProduct) });
+    if($("posQty")) $("posQty").value = 1;
+    renderPosCart();
+    if(!silent) showNotice("Added to POS cart");
+    return true;
+  }
+
+
+  async function ensureScannerLibrary(){
+    if(window.Html5Qrcode) return true;
+    await new Promise((resolve, reject) => {
+      const script = document.createElement('script');
+      script.src = 'https://unpkg.com/html5-qrcode';
+      script.onload = resolve;
+      script.onerror = reject;
+      document.head.appendChild(script);
+    });
+    return !!window.Html5Qrcode;
+  }
+  function setupCameraBarcodeScanner(){
+    const btn = $("posCameraScanBtn"), modal = $("barcodeScannerModal"), closeBtn = $("closeBarcodeScannerBtn"), reader = $("barcodeReader"), status = $("barcodeScannerStatus");
+    if(!btn || !modal || !reader) return;
+    let scanner = null;
+    let scanning = false;
+    const stop = async () => {
+      try{ if(scanner && scanning){ await scanner.stop(); } }catch(e){ console.warn(e); }
+      scanning = false;
+      modal.classList.add('hidden');
+      reader.innerHTML = '';
+    };
+    window.playBarcodeBeep = function(){
+      try{
+        const ctx = new (window.AudioContext || window.webkitAudioContext)();
+        const osc = ctx.createOscillator(); const gain = ctx.createGain();
+        osc.frequency.value = 880; gain.gain.value = 0.07;
+        osc.connect(gain); gain.connect(ctx.destination); osc.start(); setTimeout(()=>{osc.stop(); ctx.close();}, 90);
+      }catch(e){}
+    };
+    btn.onclick = async () => {
+      modal.classList.remove('hidden');
+      if(status) status.textContent = 'Opening camera... allow browser permission.';
+      try{
+        await ensureScannerLibrary();
+        scanner = new Html5Qrcode('barcodeReader');
+        scanning = true;
+        await scanner.start({ facingMode:'environment' }, { fps:10, qrbox:{ width:240, height:140 }, formatsToSupport: undefined }, async (decodedText) => {
+          const code = String(decodedText || '').trim();
+          if(!code) return;
+          if(status) status.textContent = 'Scanned: ' + code;
+          const found = findProductByVariantBarcode(adminProductsCache, code);
+          if(found){
+            selectPosProduct(found.product, found.variant || null);
+            if(found.variant) addSelectedPosToCart(1, true);
+            else showNotice('Product found. Choose variant then Add to POS Cart.');
+            window.playBarcodeBeep && window.playBarcodeBeep();
+            await stop();
+          }else{
+            showNotice('Barcode not found: ' + code);
+            if(status) status.textContent = 'Barcode not found. Add this barcode in Admin product variant first: ' + code;
+          }
+        });
+      }catch(error){
+        console.error('Camera scanner failed:', error);
+        if(status) status.textContent = 'Camera scanner failed. Use manual barcode input or allow camera permission.';
+      }
+    };
+    closeBtn && (closeBtn.onclick = stop);
+    modal.onclick = (e) => { if(e.target === modal) stop(); };
+  }
+
   function setupBarcodePos(){
     const scan = $("posScanInput"), addBtn = $("posAddBtn"), payBtn = $("posPayBtn"), clearBtn = $("posClearBtn"), cash = $("posCash");
     if(!scan || !addBtn || !payBtn) return;
     scan.addEventListener('input', () => renderPosSearch(scan.value));
     scan.addEventListener('keydown', (e) => { if(e.key === 'Enter'){ e.preventDefault(); renderPosSearch(scan.value); $("posQty")?.focus(); } });
     addBtn.onclick = () => {
-      if(!selectedPosProduct){ showNotice("Select a product first"); return; }
-      const variant = $("posVariantSelect")?.value || "Default";
-      const qty = Math.max(1, Number($("posQty")?.value || 1));
-      const available = getVariantStock(selectedPosProduct, variant);
-      const existingQty = posCart.filter(i => i.id === selectedPosProduct.id && i.size === variant).reduce((a,b)=>a+Number(b.qty||0),0);
-      if(available < existingQty + qty){ showNotice("Not enough stock for " + variant); return; }
-      const existing = posCart.find(i => i.id === selectedPosProduct.id && i.size === variant);
-      if(existing) existing.qty = Number(existing.qty) + qty;
-      else posCart.push({ id:selectedPosProduct.id, productId:selectedPosProduct.id, productDocId:selectedPosProduct.docId || selectedPosProduct.firestoreId || selectedPosProduct.id, name:selectedPosProduct.name, price:Number(selectedPosProduct.price || 0), cost:Number(selectedPosProduct.costPrice || selectedPosProduct.cost || 0), qty, size:variant, image:(selectedPosProduct.variantImages && selectedPosProduct.variantImages[variant]) || firstProductImage(selectedPosProduct) });
-      $("posQty").value = 1; scan.value = ""; renderPosSearch(""); renderPosCart(); showNotice("Added to POS cart"); scan.focus();
+      if(addSelectedPosToCart()){
+        scan.value = "";
+        renderPosSearch("");
+        scan.focus();
+      }
     };
     if(cash) cash.addEventListener('input', renderPosCart);
     clearBtn && (clearBtn.onclick = () => { posCart = []; selectedPosProduct = null; selectPosProduct(null); if(scan) scan.value = ""; renderPosSearch(""); renderPosCart(); });
@@ -2575,6 +2679,7 @@ function initAdmin(){
   setPromoDefaultValues();
   if($("clearPromoBtn")) $("clearPromoBtn").onclick = clearPromoForm;
   setupBarcodePos();
+  setupCameraBarcodeScanner();
   setupShippingAdmin();
   setupReportsAdmin();
   switchTab("products");
@@ -2591,6 +2696,7 @@ function initAdmin(){
       variants:(window.getVariantData ? window.getVariantData().variants : ($("variants") ? $("variants").value.split(/\n|,/) : []).map(v => v.trim()).filter(Boolean)),
       variantImages:(window.getVariantData ? window.getVariantData().variantImages : {}),
       variantStocks:(window.getVariantData ? window.getVariantData().variantStocks : {}),
+      variantBarcodes:(window.getVariantData ? window.getVariantData().variantBarcodes : {}),
       variantPhotoList:(window.getVariantData ? window.getVariantData().variantPhotoList : []),
       image:(function(){ const extra = window.getProductImageUrls ? window.getProductImageUrls() : [$("image").value.trim()]; const cleanExtra = extra.map(x => String(x || "").trim()).filter(Boolean); const vd = window.getVariantData ? window.getVariantData() : {variantPhotoList:[]}; return (cleanExtra[0] || vd.variantPhotoList[0]?.image || ""); })(),
       images:(function(){ const vd = window.getVariantData ? window.getVariantData() : {variantPhotoList:[]}; const variantImgs = (vd.variantPhotoList || []).map(v => v.image).filter(Boolean); const extra = (window.getProductImageUrls ? window.getProductImageUrls() : [$("image").value.trim()]).filter(Boolean); return Array.from(new Set(extra.concat(variantImgs))); })()
@@ -2650,35 +2756,40 @@ document.addEventListener("keydown", (event) => {
       const name = (row.querySelector('.variant-name')?.value || '').trim();
       const image = (row.querySelector('.variant-image')?.value || '').trim();
       const stock = Number(row.querySelector('.variant-stock')?.value || 0);
-      return { name, image, stock };
+      const barcode = (row.querySelector('.variant-barcode')?.value || '').trim();
+      return { name, image, stock, barcode };
     }).filter(v => v.name || v.image);
     const names = data.map(v => v.name).filter(Boolean);
     const imageMap = {};
     const stockMap = {};
-    data.forEach(v => { if(v.name && v.image) imageMap[v.name] = v.image; if(v.name) stockMap[v.name] = Number(v.stock || 0); });
+    const barcodeMap = {};
+    data.forEach(v => { if(v.name && v.image) imageMap[v.name] = v.image; if(v.name) stockMap[v.name] = Number(v.stock || 0); if(v.name && v.barcode) barcodeMap[v.name] = v.barcode; });
     if($('variants')) $('variants').value = names.join('\n');
     if($('variantImages')) $('variantImages').value = JSON.stringify(imageMap);
     const totalStock = sumVariantStocks(stockMap);
     if($('stock') && names.length) $('stock').value = totalStock;
-    return { variants:names, variantImages:imageMap, variantStocks:stockMap, variantPhotoList:data.filter(v => v.image || v.stock) };
+    return { variants:names, variantImages:imageMap, variantStocks:stockMap, variantBarcodes:barcodeMap, variantPhotoList:data.filter(v => v.image || v.stock || v.barcode) };
   }
   window.getVariantData = syncVariantData;
 
-  function addVariantRow(name, image, stock){
+  function addVariantRow(name, image, stock, barcode){
     const wrap = $('variantRows');
     if(!wrap) return;
     const row = document.createElement('div');
     row.className = 'variant-row variant-photo-row';
-    row.innerHTML = '<input class="variant-name" type="text" placeholder="Flavor / color name e.g. Black Wave" value=""><input class="variant-stock" type="number" min="0" placeholder="Stock"><input class="variant-image" type="text" placeholder="Image URL for this flavor/color"><label class="image-upload-btn">Upload<input class="variant-file" type="file" accept="image/*" hidden></label><button type="button" aria-label="Remove variant">Remove</button>';
+    row.innerHTML = '<input class="variant-name" type="text" placeholder="Flavor / color name e.g. Black Wave" value=""><input class="variant-stock" type="number" min="0" placeholder="Stock"><input class="variant-barcode" type="text" placeholder="Barcode from vape box"><input class="variant-image" type="text" placeholder="Image URL for this flavor/color"><label class="image-upload-btn">Upload<input class="variant-file" type="file" accept="image/*" hidden></label><button type="button" aria-label="Remove variant">Remove</button>';
     const nameInput = row.querySelector('.variant-name');
     const stockInput = row.querySelector('.variant-stock');
+    const barcodeInput = row.querySelector('.variant-barcode');
     const imageInput = row.querySelector('.variant-image');
     const fileInput = row.querySelector('.variant-file');
     nameInput.value = name || '';
     stockInput.value = Number(stock || 0);
+    barcodeInput.value = barcode || '';
     imageInput.value = image || '';
     nameInput.addEventListener('input', syncVariantData);
     stockInput.addEventListener('input', syncVariantData);
+    barcodeInput.addEventListener('input', syncVariantData);
     imageInput.addEventListener('input', syncVariantData);
     fileInput.addEventListener('change', async function(){
       const picked = fileInput.files && fileInput.files[0];
@@ -2711,12 +2822,13 @@ document.addEventListener("keydown", (event) => {
     else if(hidden && hidden.value) names = hidden.value.split(/\n|,/).map(v => v.trim()).filter(Boolean);
     const map = item?.variantImages && typeof item.variantImages === 'object' ? item.variantImages : {};
     const stockMap = item?.variantStocks && typeof item.variantStocks === 'object' ? item.variantStocks : {};
+    const barcodeMap = item?.variantBarcodes && typeof item.variantBarcodes === 'object' ? item.variantBarcodes : {};
     if(!names.length && Array.isArray(item?.variantPhotoList)) names = item.variantPhotoList.map(v => v.name).filter(Boolean);
     wrap.innerHTML = '';
-    (names.length ? names : ['']).forEach(name => addVariantRow(name, map[name] || '', stockMap[name] || 0));
+    (names.length ? names : ['']).forEach(name => addVariantRow(name, map[name] || '', stockMap[name] || 0, barcodeMap[name] || ''));
     if(Array.isArray(item?.variantPhotoList)){
       item.variantPhotoList.forEach(v => {
-        if(v && (v.image || v.stock) && !rows().some(row => (row.querySelector('.variant-image')?.value || '') === v.image && (row.querySelector('.variant-name')?.value || '') === v.name)) addVariantRow(v.name || '', v.image || '', v.stock || stockMap[v.name] || 0);
+        if(v && (v.image || v.stock || v.barcode) && !rows().some(row => (row.querySelector('.variant-name')?.value || '') === v.name)) addVariantRow(v.name || '', v.image || '', v.stock || stockMap[v.name] || 0, v.barcode || barcodeMap[v.name] || '');
       });
     }
     syncVariantData();

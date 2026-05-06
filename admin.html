@@ -182,8 +182,12 @@
           <div class="pos-layout">
             <div class="pos-card">
               <label class="pos-label">Scan Barcode / Search Product
-                <input id="posScanInput" placeholder="Scan barcode, product ID, or type product name" autocomplete="off" />
+                <input id="posScanInput" placeholder="Scan vape box barcode, product ID, or type product name" autocomplete="off" />
               </label>
+              <div class="barcode-pos-actions">
+                <button class="btn dark" type="button" id="posCameraScanBtn">📷 Use Laptop Camera Scanner</button>
+                <span class="small">Tip: add the real vape box barcode per variant in Product Edit.</span>
+              </div>
               <div class="pos-search-results" id="posSearchResults"></div>
               <div class="pos-selected" id="posSelectedBox">No product selected.</div>
               <div class="pos-form-grid">
@@ -493,6 +497,21 @@
     })();
   </script>
 
-  <script type="module" src="./app-v4.js?v=reset-sales-system-20260503-2210"></script>
+
+  <div id="barcodeScannerModal" class="scanner-modal hidden">
+    <div class="scanner-box">
+      <div class="scanner-head">
+        <div>
+          <h3>📷 Barcode Scanner</h3>
+          <p>Point the vape box barcode at your laptop camera.</p>
+        </div>
+        <button class="btn ghost" type="button" id="closeBarcodeScannerBtn">Close</button>
+      </div>
+      <div id="barcodeReader"></div>
+      <p id="barcodeScannerStatus" class="small">Waiting for camera...</p>
+    </div>
+  </div>
+
+  <script type="module" src="./app-v4.js?v=variant-barcode-scanner-20260506"></script>
 </body>
 </html>

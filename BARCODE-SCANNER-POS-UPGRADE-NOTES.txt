@@ -1,0 +1,21 @@
+VARIANT BARCODE SCANNER POS UPGRADE
+
+What was added:
+1. Admin Product Edit now has a Barcode from vape box field per variant/flavor/color.
+2. POS now has a Use Laptop Camera Scanner button.
+3. Scanning a variant barcode auto-selects the correct product + variant.
+4. If the barcode belongs to a variant, it auto-adds 1 item to the POS cart.
+5. POS still deducts stock from the selected variant after Paid + Print Receipt.
+6. Manual barcode input also searches variant barcodes.
+
+How to use:
+1. Admin > Products > Edit Product.
+2. For each variant/flavor/color, paste or scan the barcode number from the vape box.
+3. Save Product.
+4. Admin > POS > Use Laptop Camera Scanner.
+5. Allow camera permission and scan the box barcode.
+
+Important:
+- Each variant should have its own barcode if the box barcode is different per flavor/color.
+- If one barcode represents only the whole product, POS will find the product but you still need to choose variant manually.
+- Camera scanner uses browser camera permission and needs HTTPS on deployed sites.
