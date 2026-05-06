@@ -1,0 +1,524 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Mr Vape Shop Staff POS</title>
+  <link rel="stylesheet" href="./styles-v3.css" />
+
+  <style>
+    body[data-page="staff"] .admin-tab-btn:not([data-tab="pos"]){display:none!important;}
+    body[data-page="staff"] #tab-products, body[data-page="staff"] #tab-orders, body[data-page="staff"] #tab-reports, body[data-page="staff"] #tab-promos, body[data-page="staff"] #tab-customers, body[data-page="staff"] #tab-messages, body[data-page="staff"] #tab-shipping, body[data-page="staff"] #tab-agegate{display:none!important;}
+    body[data-page="staff"] #tab-pos{display:block!important;}
+  </style>
+</head>
+<body data-page="staff">
+  <div class="admin-app">
+    <aside class="sidebar">
+      <div class="sidebar-logo">MR VAPE SHOP STAFF POS</div>
+      <a href="./index.html" class="side-link">← Customer Page</a>
+      <div class="side-link active">Barcode POS Only</div>
+      <button class="side-link admin-tab-btn" type="button" data-tab="products">Products</button>
+      <button class="side-link admin-tab-btn" type="button" data-tab="orders">Orders</button>
+      <button class="side-link admin-tab-btn" type="button" data-tab="reports">Reports</button>
+      <button class="side-link admin-tab-btn" type="button" data-tab="promos">Promos</button>
+      <button class="side-link active admin-tab-btn" type="button" data-tab="pos">Barcode POS</button>
+      <button class="side-link admin-tab-btn" type="button" data-tab="customers">Customers</button>
+      <button class="side-link admin-tab-btn" type="button" data-tab="messages">Messages</button>
+      <button class="side-link admin-tab-btn" type="button" data-tab="shipping">Shipping Zones</button>
+      <button class="side-link admin-tab-btn" type="button" data-tab="agegate">18+ Gate</button>
+    </aside>
+
+    <main class="admin-main">
+      <section class="admin-top">
+        <div>
+          <h1>Inventory Dashboard</h1>
+          <p>Firebase-connected admin panel with local fallback. Use on Netlify for full online sync.</p>
+        </div>
+        <div class="top-actions-wrap">
+          <button class="btn ghost" id="switchLocalBtn">Use Local Mode</button>
+          <button class="btn ghost" id="switchFirebaseBtn">Use Firebase Mode</button>
+          <button class="btn ghost" id="seedBtn">Seed Demo Products</button>
+          <button class="btn dark" id="resetBtn">Reset Local Data</button>
+        </div>
+      </section>
+
+      <section class="stats-grid">
+        <div class="stat-card"><span>Total Products</span><strong id="statProducts">0</strong></div>
+        <div class="stat-card"><span>Total Stock</span><strong id="statStock">0</strong></div>
+        <div class="stat-card"><span>Low Stock</span><strong id="statLow">0</strong></div>
+        <div class="stat-card"><span>Categories</span><strong id="statCategories">0</strong></div>
+      </section>
+
+      <div id="tab-products" class="admin-tab-panel hidden">
+        <section class="panel">
+          <div class="panel-head">
+            <h2>Store Promo</h2>
+            <p>Already shown on the customer page</p>
+          </div>
+          <div class="notes">
+            <p><strong>🔥 Premium Vape Deals Ready to Use 🔥</strong></p>
+            <p><strong>Pods, devices, juice, batteries, and accessories</strong></p>
+            <p><strong>X-Black bundle promo ₱750 only</strong></p>
+          </div>
+        </section>
+
+        <section class="admin-grid">
+          <div class="panel">
+            <div class="panel-head">
+              <h2>Add / Edit Product</h2>
+              <p>Saved to Firebase in live mode, or browser storage in local mode.</p>
+            </div>
+
+            <form id="productForm" class="admin-form">
+              <input type="hidden" id="docId" />
+              <div class="form-grid">
+                <label>Product Name<input id="name" required placeholder="X-Black V2 Pod" /></label>
+                <label>Brand<input id="brand" required placeholder="MR VAPE SHOP" /></label>
+                <label>Category
+                  <select id="category" required>
+                    <option value="Pods">Pods</option>
+                    <option value="Devices">Devices</option>
+                    <option value="E-Juice">E-Juice</option>
+                    <option value="Battery">Battery</option>
+                    <option value="Accessories">Accessories</option>
+                    <option value="Promo">Promo</option>
+                  </select>
+                </label>
+                <label>Price<input id="price" type="number" min="0" required placeholder="450" /></label>
+                <label>Cost Price / Capital<input id="costPrice" type="number" min="0" placeholder="300" /></label>
+                <label>Old Price<input id="oldPrice" type="number" min="0" required placeholder="500" /></label>
+                <label>Total Stock<input id="stock" type="number" min="0" required placeholder="Auto total from variants" /></label>
+                <label>Sold Text<input id="sold" placeholder="120+ sold" /></label>
+                <label>Badge<input id="badge" placeholder="8 Flavors" /></label>
+              </div>
+
+              <div class="variant-builder">
+                <div class="section-header">
+                  <div class="section-text">
+                    <strong>Variants / Flavors / Colors + Photo</strong>
+                    <p class="form-hint">Add each flavor/color with its own stock and image. Customer stock will follow the selected variant.</p>
+                  </div>
+                  <button class="btn ghost" type="button" id="addVariantRowBtn">+ Add Variant</button>
+                </div>
+                <div id="variantRows" class="variant-rows"></div>
+                <textarea id="variants" class="hidden" rows="5"></textarea>
+                <textarea id="variantImages" class="hidden" rows="5"></textarea>
+              </div>
+
+              <div class="gallery-builder">
+                <div class="section-header">
+                  <div class="section-text">
+                    <strong>Extra Product Images</strong>
+                    <p class="form-hint">Optional extra images for the product gallery. Variant photos above will also appear automatically.</p>
+                  </div>
+                  <button class="btn ghost" type="button" id="addImageRowBtn">+ Add Image</button>
+                </div>
+                <div id="imageRows" class="image-rows"></div>
+                <input id="image" class="hidden" required />
+              </div>
+
+              <div class="form-actions">
+                <button type="submit" class="btn dark">Save Product</button>
+                <button type="button" class="btn ghost" id="clearFormBtn">Clear</button>
+              </div>
+            </form>
+          </div>
+
+          <div class="panel">
+            <div class="panel-head">
+              <h2>Product List</h2>
+              <p id="adminSourceLabel">Loading...</p>
+            </div>
+            <div class="table-wrap">
+              <table class="admin-table">
+                <thead>
+                  <tr><th>Product</th><th>Category</th><th>Price</th><th>Stock</th><th>Action</th></tr>
+                </thead>
+                <tbody id="adminProductTable"></tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+      </div>
+
+
+      <div id="tab-promos" class="admin-tab-panel hidden">
+        <section class="panel">
+          <div class="panel-head">
+            <h2>Editable Promo Bundles</h2>
+            <p>Create promos here. They automatically show when customers tap the bottom 🔥 Promos button.</p>
+          </div>
+          <form id="promoForm" class="admin-form" novalidate>
+            <div class="form-grid">
+              <label>Promo Name<input id="promoName" value="V2 Pod + V3 Device Bundle" placeholder="V2 Pod + V3 Device Bundle" /></label>
+              <label>Promo Price<input id="promoPrice" type="number" min="0" value="750" placeholder="750" /></label>
+              <label>Regular / Old Price<input id="promoOldPrice" type="number" min="0" value="830" placeholder="830" /></label>
+              <label>Badge<input id="promoBadge" value="BEST DEAL" placeholder="BEST DEAL" /></label>
+              <label>Item 1 / Pod<select id="promoProduct1"></select></label>
+              <label>Item 2 / Device<select id="promoProduct2"></select></label>
+              <label style="display:flex;align-items:center;gap:10px"><input id="promoActive" type="checkbox" checked style="width:auto" /> Active Promo</label>
+            </div>
+            <div class="form-actions">
+              <button type="submit" class="btn dark">Save Promo</button>
+              <button type="button" class="btn ghost" id="clearPromoBtn">Clear Promo Form</button>
+            </div>
+          </form>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <h2>Promo List</h2>
+            <p>Edit, delete, or turn OFF promos anytime.</p>
+          </div>
+          <div class="table-wrap">
+            <table class="admin-table">
+              <thead><tr><th>Promo</th><th>Price</th><th>Status</th><th>Items</th><th>Action</th></tr></thead>
+              <tbody id="adminPromoTable"></tbody>
+            </table>
+          </div>
+        </section>
+      </div>
+
+      <div id="tab-pos" class="admin-tab-panel">
+        <section class="panel">
+          <div class="panel-head">
+            <h2>Barcode POS / Walk-in Sale</h2>
+            <p>Scan or type a product code/name, choose variant, add to POS cart, then complete payment and print receipt.</p>
+          </div>
+          <div class="pos-layout">
+            <div class="pos-card">
+              <label class="pos-label">Scan Barcode / Search Product
+                <input id="posScanInput" placeholder="Scan vape box barcode, product ID, or type product name" autocomplete="off" />
+              </label>
+              <div class="barcode-pos-actions">
+                <button class="btn dark" type="button" id="posCameraScanBtn">📷 Use Laptop Camera Scanner</button>
+                <span class="small">Tip: add the real vape box barcode per variant in Product Edit.</span>
+              </div>
+              <div class="pos-search-results" id="posSearchResults"></div>
+              <div class="pos-selected" id="posSelectedBox">No product selected.</div>
+              <div class="pos-form-grid">
+                <label>Variant / Flavor / Color
+                  <select id="posVariantSelect"></select>
+                </label>
+                <label>Qty
+                  <input id="posQty" type="number" min="1" value="1" />
+                </label>
+              </div>
+              <button class="btn dark" type="button" id="posAddBtn">Add to POS Cart</button>
+            </div>
+            <div class="pos-card">
+              <div class="panel-head compact">
+                <h2>POS Cart</h2>
+                <p id="posCartCount">0 item</p>
+              </div>
+              <div id="posCartView" class="pos-cart-view"></div>
+              <div class="pos-total-row"><span>Total</span><strong id="posTotal">₱0</strong></div>
+              <div class="pos-form-grid">
+                <label>Customer Name
+                  <input id="posCustomerName" placeholder="Walk-in Customer" />
+                </label>
+                <label>Customer Phone
+                  <input id="posCustomerPhone" placeholder="Optional" />
+                </label>
+                <label>Cash Received
+                  <input id="posCash" type="number" min="0" placeholder="0" />
+                </label>
+                <label>Payment
+                  <select id="posPaymentMethod">
+                    <option value="Cash">Cash</option>
+                    <option value="GCash">GCash</option>
+                    <option value="Bank Transfer">Bank Transfer</option>
+                    <option value="Other">Other</option>
+                  </select>
+                </label>
+              </div>
+              <div class="pos-change-row"><span>Change</span><strong id="posChange">₱0</strong></div>
+              <div class="form-actions">
+                <button class="btn dark" type="button" id="posPayBtn">Paid + Print Receipt</button>
+                <button class="btn ghost" type="button" id="posClearBtn">Clear POS</button>
+              </div>
+            </div>
+          </div>
+        </section>
+      </div>
+
+      <div id="tab-reports" class="admin-tab-panel hidden">
+        <section class="panel">
+          <div class="panel-head">
+            <h2>Monthly Sales Report</h2>
+            <p>Track how many items sold, total revenue, total cost, and profit. Add Cost Price / Capital in each product to get accurate profit.</p>
+          </div>
+          <div class="admin-form">
+            <div class="form-grid">
+              <label>Report Month<input id="reportMonth" type="month" /></label>
+              <label>Status Filter
+                <select id="reportStatusFilter">
+                  <option value="all">All non-cancelled orders</option>
+                  <option value="paid-completed">Paid / Completed only</option>
+                  <option value="completed">Completed only</option>
+                </select>
+              </label>
+            </div>
+            <div class="form-actions">
+              <button type="button" class="btn dark" id="generateReportBtn">Generate Report</button>
+              <button type="button" class="btn ghost" id="exportReportBtn">Export CSV</button>
+              <button type="button" class="btn danger" id="archiveResetSalesBtn">Archive + Reset Sales</button>
+              <button type="button" class="btn danger" id="hardResetSalesBtn">Hard Reset Sales</button>
+            </div>
+            <p class="small" style="margin-top:10px">Reset clears orders/history only, so reports start at 0. Product inventory and variants are not changed.</p>
+          </div>
+        </section>
+
+        <section class="stats-grid report-stats">
+          <div class="stat-card"><span>Items Sold</span><strong id="reportItemsSold">0</strong></div>
+          <div class="stat-card"><span>Total Revenue</span><strong id="reportRevenue">₱0</strong></div>
+          <div class="stat-card"><span>Total Cost</span><strong id="reportCost">₱0</strong></div>
+          <div class="stat-card"><span>Profit</span><strong id="reportProfit">₱0</strong></div>
+        </section>
+
+
+        <section class="panel report-chart-panel">
+          <div class="panel-head">
+            <h2>Sales Charts</h2>
+            <p>Visual graph of revenue, cost, profit, and best-selling variants for the selected month.</p>
+          </div>
+          <div class="report-chart-grid">
+            <div class="chart-card">
+              <div class="chart-title">Revenue / Cost / Profit</div>
+              <canvas id="reportMoneyChart" width="520" height="260"></canvas>
+            </div>
+            <div class="chart-card">
+              <div class="chart-title">Top Items Sold</div>
+              <canvas id="reportTopItemsChart" width="520" height="260"></canvas>
+            </div>
+          </div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <h2>Top Sold Items</h2>
+            <p id="reportSubtitle">Choose a month, then generate.</p>
+          </div>
+          <div class="table-wrap">
+            <table class="admin-table">
+              <thead><tr><th>Item</th><th>Variant</th><th>Qty Sold</th><th>Revenue</th><th>Cost</th><th>Profit</th></tr></thead>
+              <tbody id="reportItemsTable"><tr><td colspan="6" class="empty">No report generated yet.</td></tr></tbody>
+            </table>
+          </div>
+        </section>
+      </div>
+
+      <div id="tab-orders" class="admin-tab-panel hidden">
+        <section class="panel">
+          <div class="panel-head">
+            <h2>POS / Orders</h2>
+            <p>After payment, click <strong>Paid + Print</strong>. The POS will ask payment details, mark paid, and open a thermal-style receipt.</p>
+          </div>
+          <div class="table-wrap">
+            <table class="admin-table">
+              <thead>
+                <tr><th>Receipt / Order ID</th><th>Customer</th><th>Total</th><th>Status</th><th>Items</th><th>Action</th></tr>
+              </thead>
+              <tbody id="ordersTable"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <h2>Order History</h2>
+            <p>Completed or moved orders transfer here automatically.</p>
+          </div>
+          <div class="table-wrap">
+            <table class="admin-table">
+              <thead>
+                <tr><th>Receipt / Order ID</th><th>Customer</th><th>Total</th><th>Final Status</th><th>Items</th><th>Action</th></tr>
+              </thead>
+              <tbody id="historyTable"></tbody>
+            </table>
+          </div>
+        </section>
+      </div>
+
+      <div id="tab-customers" class="admin-tab-panel hidden">
+        <section class="panel">
+          <div class="panel-head">
+            <h2>Customers</h2>
+            <p>Customer profiles saved from the customer page will appear here.</p>
+          </div>
+          <div class="table-wrap">
+            <table class="admin-table">
+              <thead>
+                <tr><th>Name</th><th>Phone</th><th>Email</th><th>Address</th></tr>
+              </thead>
+              <tbody id="customersTable"></tbody>
+            </table>
+          </div>
+        </section>
+      </div>
+    
+      
+      <div id="tab-messages" class="admin-tab-panel hidden">
+        <section class="panel">
+          <div class="panel-head">
+            <h2>Messages</h2>
+            <p>Messenger-style vape shop chat for admin.</p>
+          </div>
+          <div class="admin-messenger">
+            <div class="admin-conversation-list" id="messagesList"></div>
+            <div class="admin-conversation-panel">
+              <div class="admin-conversation-header" id="adminConversationHeader">Select a conversation</div>
+              <div class="admin-chat-window" id="adminChatWindow"></div>
+              <div class="admin-compose">
+                <div class="chat-quick-row" aria-label="Admin quick replies">
+                  <button class="chat-quick" type="button" data-admin-quick-reply="Hi! Yes, this is available. What flavor or color do you prefer?">Available</button>
+                  <button class="chat-quick" type="button" data-admin-quick-reply="Thank you! Please send your preferred product, flavor, quantity, and pickup/delivery details.">Ask details</button>
+                  <button class="chat-quick" type="button" data-admin-quick-reply="Your order is noted. We will update you shortly.">Order noted</button>
+                </div>
+                <textarea id="adminReplyText" placeholder="Type your reply to the customer here..."></textarea>
+                <div class="chat-upload-row">
+                  <label class="upload-chip" for="adminReplyImage">📷 Add Image</label>
+                  <input id="adminReplyImage" class="hidden-file-input" type="file" accept="image/*" />
+                  <span class="upload-file-name" id="adminReplyImageName">No image selected</span>
+                </div>
+                <div class="chat-image-preview hidden" id="adminReplyImagePreviewWrap">
+                  <img id="adminReplyImagePreview" alt="Admin selected image preview" />
+                  <button class="mini-remove-btn" id="removeAdminReplyImageBtn" type="button">Remove</button>
+                </div>
+                <div class="admin-compose-actions">
+                  <select id="adminMessageStatus" class="order-status-select">
+                    <option value="New">New</option>
+                    <option value="Replied">Replied</option>
+                    <option value="Archived">Archived</option>
+                  </select>
+                  <button class="btn dark" type="button" id="sendAdminReplyBtn">Send Reply</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+      </div>
+
+
+
+      <div id="tab-shipping" class="admin-tab-panel hidden">
+        <section class="panel">
+          <div class="panel-head">
+            <h2>Shipping / Delivery Zones</h2>
+            <p>Edit delivery fees without touching code. Customers will choose a zone in the cart before checkout.</p>
+          </div>
+          <div class="admin-form shipping-settings-form">
+            <label class="toggle-row">
+              <span>Enable delivery fee on customer checkout</span>
+              <input id="shippingEnabled" type="checkbox" checked />
+            </label>
+            <label class="toggle-row">
+              <span>Add Store Pickup option automatically</span>
+              <input id="shippingPickupEnabled" type="checkbox" checked />
+            </label>
+            <label>Free delivery minimum subtotal
+              <input id="freeShippingMin" type="number" min="0" placeholder="0 = disabled" />
+            </label>
+
+            <div class="section-header shipping-header">
+              <div class="section-text">
+                <strong>Delivery Zones</strong>
+                <p class="form-hint">Example: Davao City ₱60, Outside Davao ₱100, Pickup ₱0.</p>
+              </div>
+              <button class="btn ghost" type="button" id="addShippingZoneBtn">+ Add Zone</button>
+            </div>
+
+            <div id="shippingZoneRows" class="shipping-zone-rows"></div>
+
+            <div class="form-actions">
+              <button class="btn dark" id="saveShippingSettingsBtn" type="button">Save Shipping Settings</button>
+              <button class="btn ghost" id="resetShippingSettingsBtn" type="button">Load Default</button>
+            </div>
+            <p class="form-hint">In Firebase mode, settings are saved to <strong>settings/shipping</strong>. In local mode, settings are saved in this browser.</p>
+          </div>
+        </section>
+      </div>
+
+      <div id="tab-agegate" class="admin-tab-panel hidden">
+        <section class="panel">
+          <div class="panel-head">
+            <h2>18+ Terms Gate</h2>
+            <p>Control the age verification popup before customers enter the vape shop.</p>
+          </div>
+          <div class="admin-form age-settings-form">
+            <label class="toggle-row">
+              <span>Enable 18+ gate</span>
+              <input id="ageGateEnabled" type="checkbox" checked />
+            </label>
+            <div class="form-grid">
+              <label>Minimum Age
+                <select id="ageGateMinimumAge">
+                  <option value="18">18+</option>
+                  <option value="21">21+</option>
+                </select>
+              </label>
+              <label>Remember customer for
+                <select id="ageGateExpiry">
+                  <option value="1">1 hour</option>
+                  <option value="12">12 hours</option>
+                  <option value="24" selected>24 hours</option>
+                  <option value="168">7 days</option>
+                </select>
+              </label>
+            </div>
+            <label>Terms & Conditions Text
+              <textarea id="ageGateTerms" rows="7">By entering this website, you confirm that you are at least 18 years old. Vape products are intended for adults only. Please follow local laws and regulations regarding vape usage. By continuing, you accept full responsibility for your actions.</textarea>
+            </label>
+            <div class="age-settings-actions">
+              <button class="btn dark" id="saveAgeGateSettings" type="button">Save Age Gate Settings</button>
+              <button class="btn ghost" id="previewAgeGate" type="button">Preview on Customer Page</button>
+              <button class="btn danger" id="resetAgeGateVisitors" type="button">Force Show Again</button>
+            </div>
+            <p class="form-hint">Force Show Again clears the saved 18+ confirmation on this browser for testing.</p>
+          </div>
+        </section>
+      </div>
+
+
+    </main>
+  </div>
+
+  <div class="notice" id="notice"></div>
+
+
+  <script>
+    (function(){
+      var SETTINGS_KEY='mrVapeAgeGateSettings', VERIFIED_KEY='mrVapeAgeVerifiedAt';
+      var defaults={enabled:true,minimumAge:18,expiryHours:24,terms:'By entering this website, you confirm that you are at least 18 years old. Vape products are intended for adults only. Please follow local laws and regulations regarding vape usage. By continuing, you accept full responsibility for your actions.'};
+      function load(){try{return Object.assign({},defaults,JSON.parse(localStorage.getItem(SETTINGS_KEY)||'{}'));}catch(e){return defaults;}}
+      function ready(){
+        var enabled=document.getElementById('ageGateEnabled'); if(!enabled)return;
+        var minAge=document.getElementById('ageGateMinimumAge'), expiry=document.getElementById('ageGateExpiry'), terms=document.getElementById('ageGateTerms'), save=document.getElementById('saveAgeGateSettings'), preview=document.getElementById('previewAgeGate'), reset=document.getElementById('resetAgeGateVisitors'), settings=load();
+        enabled.checked=!!settings.enabled; minAge.value=String(settings.minimumAge||18); expiry.value=String(settings.expiryHours||24); terms.value=settings.terms||defaults.terms;
+        save.addEventListener('click',function(){localStorage.setItem(SETTINGS_KEY,JSON.stringify({enabled:enabled.checked,minimumAge:Number(minAge.value),expiryHours:Number(expiry.value),terms:terms.value.trim()||defaults.terms}));alert('18+ age gate settings saved.');});
+        preview.addEventListener('click',function(){localStorage.removeItem(VERIFIED_KEY);window.open('./index.html','_blank');});
+        reset.addEventListener('click',function(){localStorage.removeItem(VERIFIED_KEY);alert('Saved 18+ confirmation cleared on this browser.');});
+      }
+      if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',ready);else ready();
+    })();
+  </script>
+
+
+  <div id="barcodeScannerModal" class="scanner-modal hidden">
+    <div class="scanner-box">
+      <div class="scanner-head">
+        <div>
+          <h3>📷 Barcode Scanner</h3>
+          <p>Point the vape box barcode at your laptop camera.</p>
+        </div>
+        <button class="btn ghost" type="button" id="closeBarcodeScannerBtn">Close</button>
+      </div>
+      <div id="barcodeReader"></div>
+      <p id="barcodeScannerStatus" class="small">Waiting for camera...</p>
+    </div>
+  </div>
+
+  <script type="module" src="./app-v4.js?v=variant-barcode-scanner-20260506"></script>
+</body>
+</html>

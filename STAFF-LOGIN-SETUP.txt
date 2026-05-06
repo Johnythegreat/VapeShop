@@ -1,0 +1,34 @@
+STAFF LOGIN SYSTEM UPGRADE
+
+WHAT WAS ADDED
+- Staff/cashier login support.
+- Admin accounts go to admin.html.
+- Staff accounts go to staff-pos.html.
+- Staff POS page shows only Barcode POS, checkout, and receipt printing.
+- Staff cannot access Products, Promos, Reports, Reset Sales, Shipping, Messages, or 18+ settings from the staff page.
+- Firestore rules file included for proper role protection.
+
+IMPORTANT FIREBASE SETUP
+1. Firebase Console > Authentication > Add user for your cashier email/password.
+2. Copy the cashier user's UID.
+3. Firestore Database > create collection: users
+4. Create document with the cashier UID as document ID:
+   role: staff
+
+For owner/admin, create a users document too:
+   document ID: your admin UID
+   role: admin
+
+Your current admin email is still allowed by the website, but the Firestore rules require users/{UID}.role = admin for protected writes.
+
+FILES
+- admin-login.html: one login for admin and staff.
+- admin.html: full owner admin dashboard.
+- staff-pos.html: cashier-only barcode POS page.
+- firestore.rules: recommended security rules.
+
+AFTER UPLOAD
+- Replace Firestore rules with the included firestore.rules.
+- Hard refresh browser: Ctrl + F5.
+- Staff login should redirect to staff-pos.html.
+- Admin login should redirect to admin.html.

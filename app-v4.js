@@ -682,16 +682,47 @@ function isAdminEmail(email){
   return ADMIN_EMAILS.map(x => x.toLowerCase()).includes(String(email || "").toLowerCase());
 }
 
+async function getUserRole(user){
+  if(!user) return "none";
+  if(isAdminEmail(user.email)) return "admin";
+  try{
+    const roleSnap = await getDoc(doc(db, "users", user.uid));
+    const role = String(roleSnap.exists() ? (roleSnap.data().role || "") : "").toLowerCase();
+    if(role === "staff" || role === "cashier") return "staff";
+    if(role === "admin") return "admin";
+  }catch(error){ console.warn("Role check failed", error); }
+  return "none";
+}
+
 function requireAdminGuard(){
   if(!firebaseReady || !auth){
     showNotice("Firebase Auth is not ready");
     return;
   }
-  onAuthStateChanged(auth, (user) => {
-    if(!user || !isAdminEmail(user.email)){
+  onAuthStateChanged(auth, async (user) => {
+    const role = await getUserRole(user);
+    if(role !== "admin"){
+      if(role === "staff") window.location.href = "./staff-pos.html";
+      else window.location.href = "./admin-login.html";
+      return;
+    }
+    document.body.dataset.role = "admin";
+    initAdmin();
+  });
+}
+
+function requireStaffGuard(){
+  if(!firebaseReady || !auth){
+    showNotice("Firebase Auth is not ready");
+    return;
+  }
+  onAuthStateChanged(auth, async (user) => {
+    const role = await getUserRole(user);
+    if(role !== "admin" && role !== "staff"){
       window.location.href = "./admin-login.html";
       return;
     }
+    document.body.dataset.role = role === "admin" ? "admin" : "staff";
     initAdmin();
   });
 }
@@ -708,12 +739,17 @@ function initAdminLogin(){
     const password = $("loginPassword").value;
     try {
       const cred = await signInWithEmailAndPassword(auth, email, password);
-      if(!isAdminEmail(cred.user.email)){
-        await signOut(auth);
-        showNotice("This account is not allowed as admin");
+      const role = await getUserRole(cred.user);
+      if(role === "admin"){
+        window.location.href = "./admin.html";
         return;
       }
-      window.location.href = "./admin.html";
+      if(role === "staff"){
+        window.location.href = "./staff-pos.html";
+        return;
+      }
+      await signOut(auth);
+      showNotice("This account has no admin/staff role yet.");
     } catch (error) {
       showNotice("Login failed. Check email/password.");
     }
@@ -785,6 +821,7 @@ function subscribeMessages(callback){
 if(document.getElementById("adminLoginForm")) initAdminLogin();
 else if(page === "shop") initShop();
 else if(page === "admin") requireAdminGuard();
+else if(page === "staff") requireStaffGuard();
 
 document.addEventListener("DOMContentLoaded", () => {
   const inboxBtn = document.getElementById("openInboxBtn");
@@ -1974,6 +2011,21 @@ function initAdmin(){
     logoutBtn.onclick = async () => { try { await signOut(auth); } catch {} window.location.href = "./admin-login.html"; };
     topActions.appendChild(logoutBtn);
   }
+  const isStaffMode = document.body.dataset.role === "staff" || page === "staff";
+  if(isStaffMode){
+    document.querySelectorAll(".admin-tab-btn").forEach(btn => {
+      const allowed = btn.dataset.tab === "pos";
+      btn.classList.toggle("hidden", !allowed);
+      btn.style.display = allowed ? "block" : "none";
+    });
+    const top = document.querySelector(".top-actions-wrap");
+    if(top) Array.from(top.children).forEach(el => { if(el.id !== "logoutAdminBtn") el.style.display = "none"; });
+    const title = document.querySelector(".admin-top h1");
+    if(title) title.textContent = "Cashier Barcode POS";
+    const subtitle = document.querySelector(".admin-top p");
+    if(subtitle) subtitle.textContent = "Staff mode: barcode POS, checkout, and receipt printing only.";
+    setTimeout(() => switchTab("pos"), 0);
+  }
   function updateStats(items){ $("statProducts").textContent = items.length; $("statStock").textContent = items.reduce((a,b)=>a+Number(b.stock||0),0); $("statLow").textContent = items.filter(x=>Number(x.stock||0)<=10).length; $("statCategories").textContent = new Set(items.map(x=>x.category)).size; }
   function clearForm(){ form.reset(); $("docId").value = ""; if($("variants")) $("variants").value = ""; if($("variantImages")) $("variantImages").value = "{}"; if($("image")) $("image").value = ""; window.__pendingProductImages = [""]; setTimeout(() => { window.hydrateVariantRows && window.hydrateVariantRows(null); window.hydrateProductImageRows && window.hydrateProductImageRows([""]); }, 0); }
   function fillForm(item){ $("docId").value=item.id; $("name").value=item.name||""; $("brand").value=item.brand||""; $("category").value=item.category||"Pods"; $("price").value=item.price||0; if($("costPrice")) $("costPrice").value=item.costPrice||item.cost||0; $("oldPrice").value=item.oldPrice||0; $("stock").value=item.stock||0; $("sold").value=item.sold||""; $("badge").value=item.badge||""; if($("variants")) $("variants").value = Array.isArray(item.variants) ? item.variants.join("\n") : ""; if($("variantImages")) $("variantImages").value = JSON.stringify(item.variantImages || {}); const variantImgs = item.variantImages && typeof item.variantImages === "object" ? Object.values(item.variantImages).filter(Boolean) : []; const allImgs = (Array.isArray(item.images) && item.images.length ? item.images : [item.image]).filter(Boolean); const extraImgs = allImgs.filter(img => !variantImgs.includes(img)); if($("image")) $("image").value = allImgs[0] || ""; window.__pendingProductImages = extraImgs.length ? extraImgs : [""]; setTimeout(() => { window.hydrateVariantRows && window.hydrateVariantRows(item); window.hydrateProductImageRows && window.hydrateProductImageRows(window.__pendingProductImages); }, 0); window.scrollTo({top:0, behavior:"smooth"}); }
@@ -2628,6 +2680,7 @@ function initAdmin(){
     renderMessages(messages);
   });
   document.querySelectorAll(".admin-tab-btn").forEach(btn => btn.onclick = () => {
+    if((document.body.dataset.role === "staff" || page === "staff") && btn.dataset.tab !== "pos") return;
     switchTab(btn.dataset.tab);
     if(btn.dataset.tab === "promos"){ fillPromoProductSelects(); loadAdminPromos(); }
     if(btn.dataset.tab === "reports"){ renderMonthlyReport(); }
