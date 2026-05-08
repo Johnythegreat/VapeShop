@@ -10,7 +10,10 @@
     .staff-settings-menu{position:absolute;right:14px;top:58px;background:rgba(12,12,18,.96);border:1px solid rgba(255,255,255,.12);box-shadow:0 18px 45px rgba(0,0,0,.45);border-radius:16px;padding:8px;z-index:9999;min-width:170px;backdrop-filter:blur(12px)}
     .staff-settings-menu a{display:block;color:#fff;text-decoration:none;padding:11px 12px;border-radius:12px;font-size:13px;font-weight:700;letter-spacing:.2px}
     .staff-settings-menu a:hover{background:rgba(255,255,255,.10)}
-    .staff-settings-btn{position:relative}
+    #staffSettingsMenu{z-index:10002;pointer-events:auto}
+    #staffSettingsMenu.is-open{display:block!important}
+    #staffSettingsMenu.hidden:not(.is-open){display:none!important}
+    .staff-settings-btn{position:relative;z-index:10001;pointer-events:auto}
     .soft-message{opacity:.92;font-size:14px;color:#d9faff}
     .secondary-message-btn{opacity:.86}
   </style>
@@ -328,6 +331,45 @@
 
   <div class="notice" id="notice"></div>
 
+
+
+  <script>
+    // Hidden settings menu fix: safe listener independent from main app JS.
+    (function(){
+      function ready(fn){
+        if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', fn);
+        else fn();
+      }
+      ready(function(){
+        var btn = document.getElementById('staffSettingsBtn');
+        var menu = document.getElementById('staffSettingsMenu');
+        if(!btn || !menu) return;
+
+        function closeMenu(){
+          menu.classList.remove('is-open');
+          menu.classList.add('hidden');
+          menu.style.display = 'none';
+        }
+        function openMenu(){
+          menu.classList.add('is-open');
+          menu.classList.remove('hidden');
+          menu.style.display = 'block';
+        }
+        function toggleMenu(e){
+          if(e){ e.preventDefault(); e.stopPropagation(); }
+          if(menu.classList.contains('is-open')) closeMenu();
+          else openMenu();
+        }
+
+        btn.addEventListener('click', toggleMenu, true);
+        btn.addEventListener('touchstart', toggleMenu, {passive:false, capture:true});
+        menu.addEventListener('click', function(e){ e.stopPropagation(); }, true);
+        document.addEventListener('click', function(e){
+          if(!menu.contains(e.target) && !btn.contains(e.target)) closeMenu();
+        });
+      });
+    })();
+  </script>
 
   <script>
     (function(){
