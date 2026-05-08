@@ -1,0 +1,8 @@
+Hidden settings login added to customer page.
+
+Customer page gear now opens a small popup menu:
+- Admin Login
+- Staff Login
+
+Staff login redirects staff accounts to staff-pos.html / Barcode POS only.
+Make sure Firestore users/{UID}.role is set to admin or staff.

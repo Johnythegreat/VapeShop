@@ -5,6 +5,15 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Mr Vape Shop</title>
   <link rel="stylesheet" href="./styles-v3.css" />
+
+  <style>
+    .staff-settings-menu{position:absolute;right:14px;top:58px;background:rgba(12,12,18,.96);border:1px solid rgba(255,255,255,.12);box-shadow:0 18px 45px rgba(0,0,0,.45);border-radius:16px;padding:8px;z-index:9999;min-width:170px;backdrop-filter:blur(12px)}
+    .staff-settings-menu a{display:block;color:#fff;text-decoration:none;padding:11px 12px;border-radius:12px;font-size:13px;font-weight:700;letter-spacing:.2px}
+    .staff-settings-menu a:hover{background:rgba(255,255,255,.10)}
+    .staff-settings-btn{position:relative}
+    .soft-message{opacity:.92;font-size:14px;color:#d9faff}
+    .secondary-message-btn{opacity:.86}
+  </style>
 </head>
 <body data-page="shop">
   <!-- PRO 18+ AGE GATE -->
@@ -36,7 +45,11 @@
         <button class="icon-btn js-notice" data-text="Promos saved">📅</button>
         <div class="brand-wrap"><img src="logo.png" class="brand-logo" alt="Mr Vape Shop Logo"><div class="logo">MR VAPE SHOP</div></div>
         <button class="icon-btn" id="openTrackTopBtn" title="Track Order" type="button">📦</button>
-        <a class="icon-btn" href="./admin-login.html" title="Admin">⚙️</a>
+        <button class="icon-btn staff-settings-btn" id="staffSettingsBtn" title="Settings" type="button">⚙️</button>
+        <div class="staff-settings-menu hidden" id="staffSettingsMenu" aria-label="Staff settings menu">
+          <a href="./admin-login.html">🔐 Admin Login</a>
+          <a href="./staff-login.html">👨‍💼 Staff Login</a>
+        </div>
       </div>
       <div class="search-wrap">
         <div class="search">
@@ -61,15 +74,15 @@
 
         <div class="hero-copy hero-copy-wide">
           <div class="hero-eyebrow premium-pill">Premium Vape Catalog • Pods • Devices • Fast Inquiry</div>
-          <h1 class="next-hero-title">🔥 Premium Vape Deals<br><span>Ready to Use</span> 🔥</h1>
-          <p>Shop pods, devices, e-juice, batteries, and accessories in one clean vape-style catalog.</p>
-          <p>Browse best sellers, promos, and new arrivals with real-time stock from the admin page.</p>
-          <p class="next-hero-promo">🔥 <strong>BUY 10 ITEMS, GET 1 FREE T-SHIRT</strong><br><span class="promo-small">Pick any design in our shop</span></p>
-          <p>🛡️ For adult customers only. Please buy responsibly.</p>
-          <p>📩 <strong>Message us now</strong> for availability, flavors, colors, and shop pickup details.</p>
+          <h1 class="next-hero-title">Top Pods, Devices & E-Juice.<br><span>One Shop.</span></h1>
+          <p>Pods, devices, e-juice, batteries & accessories — all in stock, all in one place.</p>
+          
+          <p class="next-hero-promo">🎁 <strong>Free T-Shirt on Every 10-Item Order</strong><br><span class="promo-small">Pick your design.</span></p>
+          <p>🛡️ 18+ only. Buy responsibly.</p>
+          <p><span class="soft-message">Questions? Message us.</span></p>
           <div class="cta-row">
-            <button class="btn light premium-btn" id="shopNowBtn">Shop Now</button>
-            <button class="btn dark premium-btn" id="openAccountBtn">Message Shop</button>
+            <button class="btn light premium-btn" id="shopNowBtn">Shop Now →</button>
+            <button class="btn dark premium-btn secondary-message-btn" id="openAccountBtn">Questions? Message us.</button>
           </div>
         </div>
 

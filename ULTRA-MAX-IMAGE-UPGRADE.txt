@@ -1,0 +1,13 @@
+ULTRA MAX PRODUCT IMAGE SYSTEM
+
+Added:
+- Product card auto image slider using Extra Product Images + variant images.
+- Tap product card image to open fullscreen preview gallery.
+- Product detail main image opens fullscreen gallery.
+- Left/right gallery navigation + ESC close.
+- Product card 3D hover tilt on desktop.
+- Lazy image loading / async decoding.
+- Image dots indicator.
+
+Upload all files in this folder to your GitHub/Netlify project.
+After upload, hard refresh the customer page: Ctrl + F5.

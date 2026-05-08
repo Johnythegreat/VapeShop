@@ -1,0 +1,16 @@
+FINAL STABLE FULL BUILD
+
+Fixed:
+- Bottom Home / Category / Promos buttons now use one clean function: window.goCustomerTab()
+- Added inline + JS event binding fallback so clicks still work after reload
+- Promos button now opens the product section filtered to Promo and loads editable bundle promos
+- Admin now has a Promos tab
+- Promo bundles can be created, edited, deleted, enabled/disabled from admin
+- Customer promo bundle uses selected real product variants and deducts real product stock through the existing bundleItems order flow
+- Cancel + Restore Stock works with bundleItems
+
+Upload instructions:
+1. Extract the ZIP.
+2. Upload all files to Netlify/GitHub Pages, keeping index.html in the root.
+3. Hard refresh browser: Ctrl + F5.
+4. Open admin.html and go to Promos tab to edit bundle promos.

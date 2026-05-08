@@ -1895,6 +1895,12 @@ function initShop(){
   if($("inquiryModal")) $("inquiryModal").onclick = (e) => { if(e.target.id === "inquiryModal") closeInquiry(); };
 }
 
+function getCurrentCashierLabel(){
+  const user = auth?.currentUser;
+  const email = user?.email || "";
+  return email || document.body.dataset.role || "Admin POS";
+}
+
 async function createPosSale(cart, account={}, payment={}){
   const receiptNo = payment.receiptNo || ("MRV-" + new Date().toISOString().slice(2,10).replace(/-/g,"") + "-" + Date.now().toString().slice(-6));
   const resolveLocalProduct = (item, list) => {
@@ -1902,6 +1908,7 @@ async function createPosSale(cart, account={}, payment={}){
     return list.find(p => [p.id,p.docId,p.firestoreId,p._docId,p.sku,p.barcode].map(x=>String(x||"")).some(v => keys.includes(v)));
   };
   const cleanItems = cart.map(item => ({
+    type:item.type || (isBundleCartItem(item) ? "bundle" : "single"),
     name:item.name,
     qty:Number(item.qty || 1),
     price:Number(item.price || 0),
@@ -1910,7 +1917,8 @@ async function createPosSale(cart, account={}, payment={}){
     productDocId:item.productDocId || item.docId || item.firestoreId || item.id,
     size:item.size || item.variant || "Default",
     image:item.image || "",
-    barcode:item.barcode || ""
+    barcode:item.barcode || "",
+    bundleItems:Array.isArray(item.bundleItems) ? item.bundleItems : []
   }));
   const total = totalAmount(cleanItems, 0);
   const orderPayload = {
@@ -1926,7 +1934,7 @@ async function createPosSale(cart, account={}, payment={}){
     cashReceived:Number(payment.cashReceived || total),
     change:Math.max(0, Number(payment.cashReceived || total) - total),
     receiptNo,
-    cashier:"Admin POS"
+    cashier:payment.cashier || getCurrentCashierLabel()
   };
   if(getMode()==="firebase" && firebaseReady){
     let orderId = receiptNo;
@@ -2094,7 +2102,7 @@ function initAdmin(){
       paymentMethod,
       cashReceived: Number(cashReceived || total),
       change: Math.max(0, Number(cashReceived || total) - total),
-      cashier:"Admin POS"
+      cashier:getCurrentCashierLabel()
     };
     try{
       if(getMode()==="firebase" && firebaseReady) await updateDoc(doc(db, "orders", orderId), { ...paidData, paidAt:serverTimestamp() });
@@ -2430,6 +2438,85 @@ function initAdmin(){
     drawTopItemsChart(report);
   }
 
+
+
+  function getCommissionOrderCashier(order){
+    return String(order.cashierEmail || order.cashierName || order.cashier || order.staffEmail || order.createdByEmail || "Admin POS").trim() || "Admin POS";
+  }
+  function buildCommissionReport(monthValue, statusFilter){
+    const [yearStr, monthStr] = String(monthValue || currentMonthValue()).split("-");
+    const year = Number(yearStr), month = Number(monthStr) - 1;
+    const singleRate = Number($("commissionSingleRate")?.value || 50);
+    const bundleRate = Number($("commissionBundleRate")?.value || 50);
+    const allOrders = [...(activeOrdersCache || []), ...(historyOrdersCache || [])];
+    const map = new Map();
+    let totalSingle = 0, totalBundle = 0, totalCommission = 0, totalSales = 0;
+
+    allOrders.forEach(order => {
+      const d = reportOrderDate(order);
+      if(!d || d.getFullYear() !== year || d.getMonth() !== month) return;
+      if(!orderAllowedByReportStatus(order, statusFilter)) return;
+      const cashier = getCommissionOrderCashier(order);
+      const row = map.get(cashier) || { cashier, salesCount:0, singleUnits:0, bundleUnits:0, commissionUnits:0, commission:0 };
+      row.salesCount += 1;
+      totalSales += 1;
+      (Array.isArray(order.items) ? order.items : []).forEach(item => {
+        const qty = Number(item.qty || 1);
+        if(isBundleCartItem(item) || String(item.type || "").toLowerCase() === "bundle"){
+          row.bundleUnits += qty;
+          row.commissionUnits += qty;
+          row.commission += qty * bundleRate;
+          totalBundle += qty;
+          totalCommission += qty * bundleRate;
+        }else{
+          row.singleUnits += qty;
+          row.commissionUnits += qty;
+          row.commission += qty * singleRate;
+          totalSingle += qty;
+          totalCommission += qty * singleRate;
+        }
+      });
+      map.set(cashier, row);
+    });
+
+    const rows = Array.from(map.values()).sort((a,b)=>b.commission-a.commission);
+    return { monthValue:String(monthValue || currentMonthValue()), rows, totalSales, totalSingle, totalBundle, totalUnits:totalSingle + totalBundle, totalCommission, singleRate, bundleRate };
+  }
+  function renderCommissionReport(){
+    const monthEl = $("reportMonth");
+    const filterEl = $("reportStatusFilter");
+    if(monthEl && !monthEl.value) monthEl.value = currentMonthValue();
+    const report = buildCommissionReport(monthEl?.value || currentMonthValue(), filterEl?.value || "all");
+    if($("commissionUnitsTotal")) $("commissionUnitsTotal").textContent = String(report.totalUnits);
+    if($("commissionSingleUnits")) $("commissionSingleUnits").textContent = String(report.totalSingle);
+    if($("commissionBundleUnits")) $("commissionBundleUnits").textContent = String(report.totalBundle);
+    if($("commissionTotalPay")) $("commissionTotalPay").textContent = money(report.totalCommission);
+    const tbody = $("commissionTable");
+    if(!tbody) return;
+    if(!report.rows.length){ tbody.innerHTML = '<tr><td colspan="6" class="empty">No commission sales found for this month.</td></tr>'; return; }
+    tbody.innerHTML = report.rows.map(r => `<tr><td><strong>${escapeHtml(r.cashier)}</strong></td><td>${Number(r.salesCount || 0)}</td><td>${Number(r.singleUnits || 0)}</td><td>${Number(r.bundleUnits || 0)}</td><td>${Number(r.commissionUnits || 0)}</td><td><strong>${money(r.commission || 0)}</strong></td></tr>`).join("");
+  }
+  function exportCommissionCSV(){
+    const month = $("reportMonth")?.value || currentMonthValue();
+    const report = buildCommissionReport(month, $("reportStatusFilter")?.value || "all");
+    const lines = [
+      ["Month", month],
+      ["Single Item Rate", report.singleRate],
+      ["Bundle Rate", report.bundleRate],
+      ["Commission Items", report.totalUnits],
+      ["Total Commission", report.totalCommission],
+      [],
+      ["Cashier / Staff","Sales Count","Single Items","Bundles","Commission Items","Commission"]
+    ];
+    report.rows.forEach(r => lines.push([r.cashier, r.salesCount, r.singleUnits, r.bundleUnits, r.commissionUnits, r.commission]));
+    const csv = lines.map(row => row.map(cell => `"${String(cell ?? "").replaceAll('"','""')}"`).join(",")).join("\n");
+    const blob = new Blob([csv], {type:"text/csv;charset=utf-8"});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = `commission-report-${month}.csv`;
+    document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+  }
+
   function renderMonthlyReport(){
     const monthEl = $("reportMonth");
     const filterEl = $("reportStatusFilter");
@@ -2444,8 +2531,9 @@ function initAdmin(){
     if($("reportSubtitle")) $("reportSubtitle").textContent = `${report.ordersCount} order(s) found for ${report.monthValue}. Profit uses product Cost Price / Capital.`;
     const tbody = $("reportItemsTable");
     if(!tbody) return;
-    if(!report.rows.length){ tbody.innerHTML = '<tr><td colspan="6" class="empty">No sales found for this month.</td></tr>'; return; }
+    if(!report.rows.length){ tbody.innerHTML = '<tr><td colspan="6" class="empty">No sales found for this month.</td></tr>'; renderCommissionReport(); return; }
     tbody.innerHTML = report.rows.map(r => `<tr><td><strong>${escapeHtml(r.name)}</strong></td><td>${escapeHtml(r.variant || "Default")}</td><td>${Number(r.qty || 0)}</td><td>${money(r.revenue || 0)}</td><td>${money(r.cost || 0)}</td><td>${money(r.profit || 0)}</td></tr>`).join("");
+    renderCommissionReport();
   }
   function exportMonthlyReportCSV(){
     const month = $("reportMonth")?.value || currentMonthValue();
@@ -2517,6 +2605,10 @@ function initAdmin(){
     if($("reportMonth") && !$("reportMonth").value) $("reportMonth").value = currentMonthValue();
     if($("generateReportBtn")) $("generateReportBtn").onclick = renderMonthlyReport;
     if($("exportReportBtn")) $("exportReportBtn").onclick = exportMonthlyReportCSV;
+    if($("generateCommissionBtn")) $("generateCommissionBtn").onclick = renderCommissionReport;
+    if($("exportCommissionBtn")) $("exportCommissionBtn").onclick = exportCommissionCSV;
+    if($("commissionSingleRate")) $("commissionSingleRate").onchange = renderCommissionReport;
+    if($("commissionBundleRate")) $("commissionBundleRate").onchange = renderCommissionReport;
     if($("archiveResetSalesBtn")) $("archiveResetSalesBtn").onclick = () => resetSalesData({ archive:true });
     if($("hardResetSalesBtn")) $("hardResetSalesBtn").onclick = () => resetSalesData({ archive:false });
     if($("reportStatusFilter")) $("reportStatusFilter").onchange = renderMonthlyReport;

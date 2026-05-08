@@ -1,0 +1,8 @@
+Reset Sales Button System
+
+Added to Admin > Reports:
+- Archive + Reset Sales: backs up orders/history to archive_orders, then clears orders and order_history so reports start at 0.
+- Hard Reset Sales: deletes orders/history permanently.
+
+Inventory and product variant stock are NOT changed by reset.
+Use Archive + Reset recommended.

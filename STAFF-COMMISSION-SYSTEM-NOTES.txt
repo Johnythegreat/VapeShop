@@ -1,0 +1,27 @@
+STAFF COMMISSION SYSTEM
+
+Added inside Admin > Reports:
+- Staff Commission Report
+- Default single item commission: P50 per item
+- Default bundle commission: P50 per bundle
+- Bundle counts as 1 commission item
+- Export Commission CSV
+
+How it calculates:
+- Uses paid/completed orders in selected month
+- Voided/cancelled orders are ignored
+- Groups by cashier/staff name/email saved on POS sale
+- Staff POS sales are tagged using the logged-in Firebase user email
+
+Recommended workflow:
+1. Staff logs in using staff account.
+2. Staff uses Barcode POS.
+3. Sales are saved with cashier email.
+4. Admin opens Reports.
+5. Select month.
+6. Click Generate Commission.
+7. Export CSV for payroll/commission payment.
+
+You can change commission rates anytime in Reports:
+- Single Item Commission
+- Bundle Commission

@@ -1,0 +1,24 @@
+VOID SALE SYSTEM ADDED
+
+What changed:
+- Admin Order History now has a Void Sale button for completed POS sales.
+- Voiding a sale restores product/variant stock.
+- Voided sales stay in history for audit/reference.
+- Sales reports ignore orders with status Voided or voided: true.
+- Void requires a reason.
+
+How to use:
+1. Open Admin > Orders / Order History.
+2. Find the accidental POS sale.
+3. Click Void Sale.
+4. Enter reason, for example: Accidental POS checkout.
+5. Confirm.
+
+Result:
+- Stock is added back.
+- Report totals recalculate automatically.
+- The receipt/order remains visible as VOIDED.
+
+Firestore rules:
+- Your current staff-login rules already allow order_history update and product stock update.
+- No mandatory rule replacement is needed if you already applied the previous STAFF LOGIN SYSTEM rules.
