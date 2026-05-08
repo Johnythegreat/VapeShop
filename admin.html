@@ -288,6 +288,37 @@
           </div>
         </section>
 
+
+
+        <section class="panel commission-panel">
+          <div class="panel-head">
+            <h2>Staff Commission Report</h2>
+            <p>Commission is calculated per cashier. Default rule: ₱50 per single item sold. Bundle promo counts as 1 commission item.</p>
+          </div>
+          <div class="admin-form">
+            <div class="form-grid">
+              <label>Single Item Commission<input id="commissionSingleRate" type="number" min="0" value="50" /></label>
+              <label>Bundle Commission<input id="commissionBundleRate" type="number" min="0" value="50" /></label>
+            </div>
+            <div class="form-actions">
+              <button type="button" class="btn dark" id="generateCommissionBtn">Generate Commission</button>
+              <button type="button" class="btn ghost" id="exportCommissionBtn">Export Commission CSV</button>
+            </div>
+          </div>
+          <section class="stats-grid report-stats" style="margin-top:14px">
+            <div class="stat-card"><span>Commission Items</span><strong id="commissionUnitsTotal">0</strong></div>
+            <div class="stat-card"><span>Single Items</span><strong id="commissionSingleUnits">0</strong></div>
+            <div class="stat-card"><span>Bundles</span><strong id="commissionBundleUnits">0</strong></div>
+            <div class="stat-card"><span>Total Commission</span><strong id="commissionTotalPay">₱0</strong></div>
+          </section>
+          <div class="table-wrap" style="margin-top:14px">
+            <table class="admin-table">
+              <thead><tr><th>Cashier / Staff</th><th>Sales Count</th><th>Single Items</th><th>Bundles</th><th>Commission Items</th><th>Commission</th></tr></thead>
+              <tbody id="commissionTable"><tr><td colspan="6" class="empty">Choose a month, then generate commission.</td></tr></tbody>
+            </table>
+          </div>
+        </section>
+
         <section class="panel">
           <div class="panel-head">
             <h2>Top Sold Items</h2>
