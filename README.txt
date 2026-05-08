@@ -1,40 +1,47 @@
-MR VAPE SHOP - VAPE STORE BUILD
+MR VAPE SHOP - MASTER README
 
-Included:
-- Vape shop customer storefront with dark premium vape-style frontend
-- Firebase config updated to project: vape-shop-2
-- Products, cart, checkout, customer profile, order history, and messages
-- Admin product editor, orders dashboard, customers, and messenger-style inbox
-- Local fallback still works if Firebase is not available
+LOGIN PAGES
+- index.html = Customer shop
+- admin-login.html = Admin login
+- staff-login.html = Staff/Cashier login
+- staff-pos.html = Barcode POS only
 
-Demo products included:
-- X-Black V2 Pod - ₱450
-- X-Black V3 Device - ₱380
-- X-Black Pod + Device Bundle - ₱750
-- Premium E-Juice Flavor
+STAFF LOGIN SETUP
+1. Firebase Console > Authentication > Sign-in method
+2. Enable Email/Password.
+3. Firebase Console > Authentication > Users > Add user.
+4. Create staff email/password.
+5. Copy the staff User UID.
+6. Firestore > create/use collection: users (lowercase)
+7. Create document with Document ID = staff UID.
+8. Add field:
+   role: "staff"
 
-Important setup:
-1. Upload this folder to Netlify or GitHub Pages.
-2. In Firebase Authentication, enable Email/Password sign-in.
-3. Add your admin email inside firebase-config.js ADMIN_EMAILS.
-4. Publish firestore.rules in Firebase Firestore Rules.
-5. Open admin-login.html to log in.
+OPTIONAL STAFF FIELDS
+- name: "Cashier Name"
+- commissionRate: 50
 
-PRO CHAT UPGRADE ADDED:
-- Customer chat is now full dark vape theme.
-- Admin messages page is now full dark vape theme.
-- Send Message and Send Reply buttons changed to dark readable style.
-- Close button is now visible on customer chat popup.
-- Added customer quick message chips.
-- Added admin quick reply chips.
-- Added Enter-to-send and Shift+Enter new line support.
-- Fixed duplicate customer send click binding.
+ADMIN ROLE SETUP
+Firestore collection: users
+Document ID = admin UID
+Fields:
+- role: "admin"
 
+IMPORTANT
+- The collection name must be exactly: users
+- The field name must be exactly: role
+- The staff value must be lowercase: staff
+- Open the deployed website URL, not local file:// HTML.
+- After uploading to GitHub Pages, press Ctrl + F5.
 
+AUTHORIZED DOMAIN
+If login gives unauthorized-domain, go to Firebase > Authentication > Settings > Authorized domains and add:
+johnythegreat.github.io
 
-FINAL BUILD NOTES
-- Added Mister Vape Shop logo as logo.png.
-- Updated hero promo to: BUY 10 ITEMS, GET 1 FREE T-SHIRT.
-- Updated promo cards to highlight free T-shirt promo.
-- Added premium logo glow and final dark vape UI polish.
-- Keep firebase-config.js and firestore.rules from this build.
+WHAT WAS FIXED IN THIS BUILD
+- Rebuilt staff-login.html with standalone browser Firebase Auth.
+- Removed the broken module auth flow that caused ServerAppCurrentUserOperationNotSupportedError.
+- Staff login now gives clearer error messages.
+- Staff with role staff redirects to staff-pos.html.
+
+END
