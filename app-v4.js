@@ -2104,6 +2104,83 @@ function initAdmin(){
     }catch(error){ showNotice("Payment update failed"); }
   }
 
+  async function voidHistorySale(orderId){
+    const order = (historyOrdersCache || []).find(x => String(x.id || x.docId || x.firestoreId) === String(orderId));
+    if(!order) { showNotice("Sale not found"); return; }
+    const currentStatus = String(order.status || "").toLowerCase();
+    if(currentStatus.includes("void") || currentStatus.includes("cancel")) { showNotice("This sale is already voided/cancelled"); return; }
+    const reason = prompt("Void reason (required):", "Accidental POS checkout");
+    if(reason === null) return;
+    if(!String(reason).trim()) { showNotice("Void cancelled. Reason is required."); return; }
+    if(!confirm("Void this POS sale and restore stock? Reports will ignore this sale.")) return;
+
+    if(getMode()==="firebase" && firebaseReady){
+      await runTransaction(db, async (transaction) => {
+        const reads = [];
+        for(const item of (order.items || [])){
+          forEachStockComponent(item, component => {
+            const pid = component.productDocId || component.docId || component.firestoreId || component.productId || component.id || item.productDocId || item.productId || item.id;
+            if(!pid) return;
+            const ref = doc(db, "products", pid);
+            reads.push({ item, component, ref });
+          });
+        }
+        for(const row of reads){ row.snap = await transaction.get(row.ref); }
+        const updateMap = new Map();
+        for(const row of reads){
+          if(!row.snap.exists()) continue;
+          const data = row.snap.data();
+          const qty = Number(row.component?.qty || row.item.qty || 1);
+          const variant = row.component?.size || row.component?.variant || row.item.size || row.item.variant || "Default";
+          const key = row.ref.path;
+          let state = updateMap.get(key);
+          if(!state){
+            state = {
+              ref:row.ref,
+              variantStocks:(data.variantStocks && typeof data.variantStocks === "object") ? { ...data.variantStocks } : null,
+              stock:Number(data.stock || 0),
+              hasVariants:Array.isArray(data.variants)
+            };
+            updateMap.set(key, state);
+          }
+          if(variant && (state.variantStocks || state.hasVariants)){
+            const map = state.variantStocks || {};
+            map[variant] = Number(map[variant] || 0) + qty;
+            state.variantStocks = map;
+          } else {
+            state.stock += qty;
+          }
+        }
+        updateMap.forEach(state => {
+          if(state.variantStocks) transaction.update(state.ref, { variantStocks:state.variantStocks, stock:sumVariantStocks(state.variantStocks), updatedAt:serverTimestamp() });
+          else transaction.update(state.ref, { stock:state.stock, updatedAt:serverTimestamp() });
+        });
+        const histId = order.firestoreId || order.docId || order.id || orderId;
+        const histRef = doc(db, "order_history", histId);
+        transaction.update(histRef, { status:"Voided", paymentStatus:"Voided", voided:true, voidReason:String(reason).trim(), stockRestored:true, voidedAt:serverTimestamp() });
+      });
+      return;
+    }
+
+    const products = getLocalProducts();
+    (order.items || []).forEach(item => {
+      forEachStockComponent(item, component => {
+        const pid = component.productDocId || component.docId || component.firestoreId || component.productId || component.id || item.productDocId || item.productId || item.id;
+        const p = products.find(x => [x.id,x.docId,x.firestoreId,x._docId,x.sku,x.barcode].map(v=>String(v||"")).includes(String(pid||"")));
+        if(!p) return;
+        const qty = Number(component.qty || item.qty || 1);
+        const variant = component.size || component.variant || item.size || item.variant || "Default";
+        const map = variantStockMap(p);
+        if(variant && (Object.keys(map).length || Array.isArray(p.variants))){ p.variantStocks = { ...map, [variant]: Number(map[variant] || 0) + qty }; p.stock = sumVariantStocks(p.variantStocks); }
+        else p.stock = Number(p.stock || 0) + qty;
+      });
+    });
+    setLocalProducts(products);
+    const history = getLocalHistory();
+    const idx = history.findIndex(o => String(o.id) === String(orderId));
+    if(idx >= 0){ history[idx] = { ...history[idx], status:"Voided", paymentStatus:"Voided", voided:true, voidReason:String(reason).trim(), stockRestored:true, voidedAt:new Date().toISOString() }; setLocalHistory(history); }
+  }
+
   function renderOrders(activeOrders, historyOrders){
     activeOrdersCache = activeOrders.slice();
     const allOrdersForPrint = activeOrders.concat(historyOrders || []);
@@ -2120,8 +2197,9 @@ function initAdmin(){
     }
     if(!historyOrders.length) historyBody.innerHTML = '<tr><td colspan="6" class="empty">No order history yet.</td></tr>';
     else {
-      historyBody.innerHTML = historyOrders.map(order => `<tr><td><div style="font-weight:800">${escapeHtml(order.receiptNo || order.id || "-")}</div><div class="small">${escapeHtml(order.id||"")}</div></td><td><div style="font-weight:800">${escapeHtml(order.customer?.name||"-")}</div><div class="small">${escapeHtml(order.customer?.phone||"")}</div></td><td>${money(order.total||0)}</td><td>${escapeHtml(order.status||"Completed")}</td><td>${(order.items||[]).map(i => `${escapeHtml(i.name)} x${Number(i.qty)}<br><span class="small">${escapeHtml(i.size || "")}</span>`).join("<br>")}</td><td><button class="btn ghost" data-history-print="${escapeHtml(order.id||"")}">Reprint</button></td></tr>`).join("");
+      historyBody.innerHTML = historyOrders.map(order => { const isVoided = String(order.status || "").toLowerCase().includes("void") || order.voided; return `<tr><td><div style="font-weight:800">${escapeHtml(order.receiptNo || order.id || "-")}</div><div class="small">${escapeHtml(order.id||"")}</div>${isVoided ? `<div class="small" style="color:#ff9aa8;font-weight:900">VOIDED${order.voidReason ? ": "+escapeHtml(order.voidReason) : ""}</div>` : ""}</td><td><div style="font-weight:800">${escapeHtml(order.customer?.name||"-")}</div><div class="small">${escapeHtml(order.customer?.phone||"")}</div></td><td>${money(order.total||0)}</td><td>${escapeHtml(order.status||"Completed")}</td><td>${(order.items||[]).map(i => `${escapeHtml(i.name)} x${Number(i.qty)}<br><span class="small">${escapeHtml(i.size || "")}</span>`).join("<br>")}</td><td><div class="row-actions"><button class="btn ghost" data-history-print="${escapeHtml(order.id||"")}">Reprint</button>${isVoided ? "" : `<button class="btn danger" data-void-sale="${escapeHtml(order.id||"")}">Void Sale</button>`}</div></td></tr>`; }).join("");
       historyBody.querySelectorAll("[data-history-print]").forEach(btn => btn.onclick = () => printReceipt(allOrdersForPrint.find(x => x.id === btn.dataset.historyPrint)));
+      historyBody.querySelectorAll("[data-void-sale]").forEach(btn => btn.onclick = async () => { try { await voidHistorySale(btn.dataset.voidSale); showNotice("Sale voided, stock restored, reports updated"); } catch(error) { console.error(error); showNotice(error.message || "Void sale failed"); } });
     }
   }
 
@@ -2185,7 +2263,7 @@ function initAdmin(){
   function orderAllowedByReportStatus(order, filter){
     const status = String(order.status || "").toLowerCase();
     const pay = String(order.paymentStatus || "").toLowerCase();
-    if(status.includes("cancel")) return false;
+    if(status.includes("cancel") || status.includes("void") || order.voided) return false;
     if(filter === "completed") return status.includes("completed");
     if(filter === "paid-completed") return status.includes("completed") || status.includes("paid") || pay.includes("paid");
     return true;

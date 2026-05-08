@@ -142,6 +142,28 @@ const getVariantStock = (p, variant) => {
   if(variant && Object.prototype.hasOwnProperty.call(map, variant)) return Number(map[variant] || 0);
   return Number(p?.stock || 0);
 };
+const variantBarcodeMap = (p) => (p && p.variantBarcodes && typeof p.variantBarcodes === "object") ? p.variantBarcodes : {};
+const getVariantBarcode = (p, variant) => String(variantBarcodeMap(p)[variant] || "").trim();
+function findProductByVariantBarcode(list, barcode){
+  const code = String(barcode || "").trim().toLowerCase();
+  if(!code) return null;
+  for(const product of (list || [])){
+    const productCodes = [product?.barcode, product?.sku, product?.id, product?.docId, product?.firestoreId, product?._docId]
+      .map(v => String(v || "").trim().toLowerCase()).filter(Boolean);
+    if(productCodes.includes(code)) return { product, variant:null, barcodeType:"product" };
+    const map = variantBarcodeMap(product);
+    for(const [variant, value] of Object.entries(map)){
+      if(String(value || "").trim().toLowerCase() === code) return { product, variant, barcodeType:"variant" };
+    }
+    if(Array.isArray(product?.variantPhotoList)){
+      for(const row of product.variantPhotoList){
+        if(String(row?.barcode || "").trim().toLowerCase() === code) return { product, variant:row.name || row.variant || null, barcodeType:"variant" };
+      }
+    }
+  }
+  return null;
+}
+
 const sumVariantStocks = (map) => Object.values(map || {}).reduce((sum, value) => sum + Number(value || 0), 0);
 
 const isBundleCartItem = (item) => item && item.type === "bundle" && Array.isArray(item.bundleItems);
@@ -660,16 +682,47 @@ function isAdminEmail(email){
   return ADMIN_EMAILS.map(x => x.toLowerCase()).includes(String(email || "").toLowerCase());
 }
 
+async function getUserRole(user){
+  if(!user) return "none";
+  if(isAdminEmail(user.email)) return "admin";
+  try{
+    const roleSnap = await getDoc(doc(db, "users", user.uid));
+    const role = String(roleSnap.exists() ? (roleSnap.data().role || "") : "").toLowerCase();
+    if(role === "staff" || role === "cashier") return "staff";
+    if(role === "admin") return "admin";
+  }catch(error){ console.warn("Role check failed", error); }
+  return "none";
+}
+
 function requireAdminGuard(){
   if(!firebaseReady || !auth){
     showNotice("Firebase Auth is not ready");
     return;
   }
-  onAuthStateChanged(auth, (user) => {
-    if(!user || !isAdminEmail(user.email)){
+  onAuthStateChanged(auth, async (user) => {
+    const role = await getUserRole(user);
+    if(role !== "admin"){
+      if(role === "staff") window.location.href = "./staff-pos.html";
+      else window.location.href = "./admin-login.html";
+      return;
+    }
+    document.body.dataset.role = "admin";
+    initAdmin();
+  });
+}
+
+function requireStaffGuard(){
+  if(!firebaseReady || !auth){
+    showNotice("Firebase Auth is not ready");
+    return;
+  }
+  onAuthStateChanged(auth, async (user) => {
+    const role = await getUserRole(user);
+    if(role !== "admin" && role !== "staff"){
       window.location.href = "./admin-login.html";
       return;
     }
+    document.body.dataset.role = role === "admin" ? "admin" : "staff";
     initAdmin();
   });
 }
@@ -686,12 +739,17 @@ function initAdminLogin(){
     const password = $("loginPassword").value;
     try {
       const cred = await signInWithEmailAndPassword(auth, email, password);
-      if(!isAdminEmail(cred.user.email)){
-        await signOut(auth);
-        showNotice("This account is not allowed as admin");
+      const role = await getUserRole(cred.user);
+      if(role === "admin"){
+        window.location.href = "./admin.html";
         return;
       }
-      window.location.href = "./admin.html";
+      if(role === "staff"){
+        window.location.href = "./staff-pos.html";
+        return;
+      }
+      await signOut(auth);
+      showNotice("This account has no admin/staff role yet.");
     } catch (error) {
       showNotice("Login failed. Check email/password.");
     }
@@ -763,6 +821,7 @@ function subscribeMessages(callback){
 if(document.getElementById("adminLoginForm")) initAdminLogin();
 else if(page === "shop") initShop();
 else if(page === "admin") requireAdminGuard();
+else if(page === "staff") requireStaffGuard();
 
 document.addEventListener("DOMContentLoaded", () => {
   const inboxBtn = document.getElementById("openInboxBtn");
@@ -1850,7 +1909,8 @@ async function createPosSale(cart, account={}, payment={}){
     productId:item.productId || item.id,
     productDocId:item.productDocId || item.docId || item.firestoreId || item.id,
     size:item.size || item.variant || "Default",
-    image:item.image || ""
+    image:item.image || "",
+    barcode:item.barcode || ""
   }));
   const total = totalAmount(cleanItems, 0);
   const orderPayload = {
@@ -1951,6 +2011,21 @@ function initAdmin(){
     logoutBtn.onclick = async () => { try { await signOut(auth); } catch {} window.location.href = "./admin-login.html"; };
     topActions.appendChild(logoutBtn);
   }
+  const isStaffMode = document.body.dataset.role === "staff" || page === "staff";
+  if(isStaffMode){
+    document.querySelectorAll(".admin-tab-btn").forEach(btn => {
+      const allowed = btn.dataset.tab === "pos";
+      btn.classList.toggle("hidden", !allowed);
+      btn.style.display = allowed ? "block" : "none";
+    });
+    const top = document.querySelector(".top-actions-wrap");
+    if(top) Array.from(top.children).forEach(el => { if(el.id !== "logoutAdminBtn") el.style.display = "none"; });
+    const title = document.querySelector(".admin-top h1");
+    if(title) title.textContent = "Cashier Barcode POS";
+    const subtitle = document.querySelector(".admin-top p");
+    if(subtitle) subtitle.textContent = "Staff mode: barcode POS, checkout, and receipt printing only.";
+    setTimeout(() => switchTab("pos"), 0);
+  }
   function updateStats(items){ $("statProducts").textContent = items.length; $("statStock").textContent = items.reduce((a,b)=>a+Number(b.stock||0),0); $("statLow").textContent = items.filter(x=>Number(x.stock||0)<=10).length; $("statCategories").textContent = new Set(items.map(x=>x.category)).size; }
   function clearForm(){ form.reset(); $("docId").value = ""; if($("variants")) $("variants").value = ""; if($("variantImages")) $("variantImages").value = "{}"; if($("image")) $("image").value = ""; window.__pendingProductImages = [""]; setTimeout(() => { window.hydrateVariantRows && window.hydrateVariantRows(null); window.hydrateProductImageRows && window.hydrateProductImageRows([""]); }, 0); }
   function fillForm(item){ $("docId").value=item.id; $("name").value=item.name||""; $("brand").value=item.brand||""; $("category").value=item.category||"Pods"; $("price").value=item.price||0; if($("costPrice")) $("costPrice").value=item.costPrice||item.cost||0; $("oldPrice").value=item.oldPrice||0; $("stock").value=item.stock||0; $("sold").value=item.sold||""; $("badge").value=item.badge||""; if($("variants")) $("variants").value = Array.isArray(item.variants) ? item.variants.join("\n") : ""; if($("variantImages")) $("variantImages").value = JSON.stringify(item.variantImages || {}); const variantImgs = item.variantImages && typeof item.variantImages === "object" ? Object.values(item.variantImages).filter(Boolean) : []; const allImgs = (Array.isArray(item.images) && item.images.length ? item.images : [item.image]).filter(Boolean); const extraImgs = allImgs.filter(img => !variantImgs.includes(img)); if($("image")) $("image").value = allImgs[0] || ""; window.__pendingProductImages = extraImgs.length ? extraImgs : [""]; setTimeout(() => { window.hydrateVariantRows && window.hydrateVariantRows(item); window.hydrateProductImageRows && window.hydrateProductImageRows(window.__pendingProductImages); }, 0); window.scrollTo({top:0, behavior:"smooth"}); }
@@ -1973,26 +2048,34 @@ function initAdmin(){
     const total = Number(order.total || subtotal + shipping || 0);
     const cashReceived = Number(order.cashReceived || 0);
     const change = Math.max(0, Number(order.change || (cashReceived ? cashReceived - total : 0)));
-    const dateText = order.paidAt && typeof order.paidAt === "string" ? new Date(order.paidAt).toLocaleString() : new Date().toLocaleString();
+    const dateSource = order.paidAt || order.completedAt || order.createdAt || new Date().toISOString();
+    const dateText = toDateSafe(dateSource)?.toLocaleString() || new Date().toLocaleString();
     const receiptNo = receiptNumber(order);
-    const rowsHtml = items.map((item, index) => `
-      <tr>
+    const safeMoney = (v) => money(Number(v || 0));
+    const rowsHtml = items.map((item, index) => {
+      const qty = Number(item.qty || 0);
+      const price = Number(item.price || 0);
+      const variant = item.size || item.variant || item.flavor || "Default";
+      const bundleNote = isBundleCartItem(item) && Array.isArray(item.bundleItems)
+        ? `<div class="bundle-lines">${item.bundleItems.map(b => `${escapeHtml(b.name || "Bundle item")} - ${escapeHtml(b.size || b.variant || "Default")}`).join("<br>")}</div>`
+        : "";
+      return `<tr>
         <td class="num">${index + 1}</td>
-        <td class="item-name">${escapeHtml(item.name || "Item")}<br><span>${escapeHtml(item.size || item.variant || "Default")}</span></td>
-        <td class="qty">${Number(item.qty || 0)}</td>
-        <td class="money-cell">${money(item.price || 0)}</td>
-        <td class="money-cell">${money(Number(item.price || 0) * Number(item.qty || 0))}</td>
-      </tr>
-    `).join("");
+        <td class="item-name"><strong>${escapeHtml(item.name || "Item")}</strong><br><span>${escapeHtml(variant)}</span>${bundleNote}</td>
+        <td class="qty">${qty}</td>
+        <td class="money-cell">${safeMoney(price)}</td>
+        <td class="money-cell"><strong>${safeMoney(price * qty)}</strong></td>
+      </tr>`;
+    }).join("");
     const html = `<!doctype html><html><head><title>Receipt ${escapeHtml(receiptNo)}</title><meta name="viewport" content="width=device-width,initial-scale=1"><style>
-      :root{--paper:80mm}*{box-sizing:border-box}body{font-family:Arial,Helvetica,sans-serif;margin:0;color:#111;background:#f3f4f6}.toolbar{position:sticky;top:0;background:#0b1220;color:white;padding:10px;display:flex;gap:8px;justify-content:center;flex-wrap:wrap}.toolbar button{border:0;border-radius:10px;padding:10px 12px;font-weight:800;cursor:pointer}.toolbar .primary{background:#111827;color:#fff;border:1px solid #374151}.toolbar .light{background:#fff;color:#111}.receipt{width:var(--paper);max-width:100%;margin:14px auto;background:#fff;padding:12px 10px;box-shadow:0 10px 30px rgba(0,0,0,.18)}.center{text-align:center}.shop{font-size:18px;font-weight:900;letter-spacing:.5px}.tag{font-size:11px;text-transform:uppercase;letter-spacing:1.2px}.muted{font-size:11px;color:#444;line-height:1.45}.paid{font-size:13px;font-weight:900;border:2px solid #111;display:inline-block;padding:5px 16px;margin:8px 0 2px;border-radius:999px}hr{border:0;border-top:1px dashed #777;margin:10px 0}table{width:100%;border-collapse:collapse;font-size:11px}th{font-size:10px;text-transform:uppercase;text-align:left;border-bottom:1px solid #111;padding:4px 0}td{padding:5px 0;border-bottom:1px dashed #ddd;vertical-align:top}.num{width:14px}.qty{text-align:center;width:22px}.money-cell{text-align:right;white-space:nowrap}.item-name span{font-size:10px;color:#555}.summary td{border:0;padding:3px 0}.summary .grand td{font-size:15px;font-weight:900;border-top:1px dashed #777;padding-top:7px}.barcode{font-family:"Courier New",monospace;font-size:12px;letter-spacing:2px;border:1px solid #111;padding:6px;margin:8px 0 2px;word-break:break-all}.footer{font-size:11px;line-height:1.5}.copy{font-size:10px;color:#666}@page{size:80mm auto;margin:4mm}@media print{body{background:#fff}.toolbar{display:none}.receipt{width:80mm;margin:0;box-shadow:none;padding:0 2mm}body.print-58 .receipt{width:58mm}@page{margin:2mm}}
+      :root{--paper:80mm;--ink:#111;--muted:#555;--line:#222}*{box-sizing:border-box}body{font-family:Arial,Helvetica,sans-serif;margin:0;color:var(--ink);background:#edf0f5}.toolbar{position:sticky;top:0;background:#0b1220;color:white;padding:10px;display:flex;gap:8px;justify-content:center;flex-wrap:wrap}.toolbar button{border:0;border-radius:10px;padding:10px 12px;font-weight:900;cursor:pointer}.toolbar .primary{background:#11c5f5;color:#06121f}.toolbar .light{background:#fff;color:#111}.receipt{width:var(--paper);max-width:100%;margin:14px auto;background:#fff;padding:12px 10px;box-shadow:0 18px 45px rgba(0,0,0,.20)}.center{text-align:center}.brand-row{display:flex;align-items:center;justify-content:center;gap:7px}.logo-dot{width:24px;height:24px;border:2px solid #111;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:12px;font-weight:900}.shop{font-size:19px;font-weight:1000;letter-spacing:.7px}.tag{font-size:10px;text-transform:uppercase;letter-spacing:1.4px;color:#333}.paid{font-size:12px;font-weight:1000;border:2px solid #111;display:inline-block;padding:5px 18px;margin:7px 0 2px;border-radius:999px}.meta{font-size:11px;line-height:1.55}.meta-grid{display:grid;grid-template-columns:1fr;gap:1px}.meta b{font-weight:900}.muted{font-size:11px;color:var(--muted);line-height:1.45}hr{border:0;border-top:1px dashed #777;margin:9px 0}table{width:100%;border-collapse:collapse;font-size:11px}th{font-size:9px;text-transform:uppercase;text-align:left;border-bottom:1px solid #111;padding:4px 0}td{padding:5px 0;border-bottom:1px dashed #ddd;vertical-align:top}.num{width:14px}.qty{text-align:center;width:24px}.money-cell{text-align:right;white-space:nowrap}.item-name strong{font-size:11px}.item-name span{font-size:10px;color:#555}.bundle-lines{font-size:9px;color:#555;margin-top:2px;line-height:1.35}.summary td{border:0;padding:3px 0}.summary .grand td{font-size:16px;font-weight:1000;border-top:1px dashed #777;padding-top:7px}.summary .label{font-weight:800}.barcode{font-family:"Courier New",monospace;font-size:12px;letter-spacing:2px;border:1px solid #111;padding:6px;margin:8px 0 2px;word-break:break-all}.policy{border:1px dashed #999;border-radius:8px;padding:6px;margin-top:8px;font-size:10px;line-height:1.35}.footer{font-size:11px;line-height:1.5;font-weight:800}.copy{font-size:10px;color:#666}.cut{font-size:10px;color:#888;letter-spacing:3px;margin-top:6px}@page{size:80mm auto;margin:3mm}@media print{body{background:#fff}.toolbar{display:none}.receipt{width:80mm;margin:0;box-shadow:none;padding:0 1.5mm}body.print-58 .receipt{width:58mm;font-size:10px}body.print-58 .shop{font-size:15px}body.print-58 table{font-size:9px}body.print-58 th{font-size:8px}body.print-58 .meta,body.print-58 .muted{font-size:9px}@page{margin:2mm}}
     </style></head><body><div class="toolbar no-print"><button class="primary" onclick="window.print()">🧾 Print Receipt</button><button class="light" onclick="document.body.classList.toggle('print-58');document.documentElement.style.setProperty('--paper',document.body.classList.contains('print-58')?'58mm':'80mm')">58mm / 80mm</button><button class="light" onclick="window.close()">Close</button></div><div class="receipt">
-      <div class="center"><div class="shop">MR VAPE SHOP</div><div class="tag">Official POS Receipt</div><div class="paid">PAID</div></div><hr>
-      <div class="muted"><strong>Receipt No:</strong> ${escapeHtml(receiptNo)}<br><strong>Order ID:</strong> ${escapeHtml(order.id || "-")}<br><strong>Date:</strong> ${escapeHtml(dateText)}<br><strong>Cashier:</strong> ${escapeHtml(order.cashier || "Admin POS")}<br><strong>Customer:</strong> ${escapeHtml(order.customer?.name || "Walk-in Customer")}<br><strong>Phone:</strong> ${escapeHtml(order.customer?.phone || "-")}<br><strong>Delivery:</strong> ${escapeHtml(order.shippingZone || (shipping ? "Delivery" : "Walk-in / Pickup"))}</div><hr>
-      <table><thead><tr><th>#</th><th>Item</th><th>Qty</th><th style="text-align:right">Price</th><th style="text-align:right">Total</th></tr></thead><tbody>${rowsHtml}</tbody></table><hr>
-      <table class="summary"><tr><td>Subtotal</td><td class="money-cell">${money(subtotal)}</td></tr><tr><td>Shipping/Fee</td><td class="money-cell">${money(shipping)}</td></tr><tr><td>Payment</td><td class="money-cell">${escapeHtml(order.paymentMethod || "Cash")}</td></tr>${cashReceived ? `<tr><td>Cash Received</td><td class="money-cell">${money(cashReceived)}</td></tr><tr><td>Change</td><td class="money-cell">${money(change)}</td></tr>` : ""}<tr class="grand"><td>TOTAL</td><td class="money-cell">${money(total)}</td></tr></table>
-      <hr><div class="center"><div class="barcode">*${escapeHtml(receiptNo)}*</div><div class="footer">Thank you for shopping with us!<br>Please keep this receipt for reference.</div><div class="copy">Powered by MR VAPE SHOP POS</div></div>
-    </div><script>window.onload=function(){setTimeout(function(){window.print()},500)}<\/script></body></html>`;
+      <div class="center"><div class="brand-row"><span class="logo-dot">MV</span><div class="shop">MR VAPE SHOP</div></div><div class="tag">POS Official Receipt</div><div class="paid">PAID</div></div><hr>
+      <div class="meta"><div class="meta-grid"><div><b>Receipt:</b> ${escapeHtml(receiptNo)}</div><div><b>Date:</b> ${escapeHtml(dateText)}</div><div><b>Cashier:</b> ${escapeHtml(order.cashier || "Admin POS")}</div><div><b>Customer:</b> ${escapeHtml(order.customer?.name || "Walk-in Customer")}</div><div><b>Phone:</b> ${escapeHtml(order.customer?.phone || "-")}</div><div><b>Order:</b> ${escapeHtml(order.id || receiptNo)}</div><div><b>Type:</b> ${escapeHtml(order.shippingZone || (shipping ? "Delivery" : "Store Pickup / POS"))}</div></div></div><hr>
+      <table><thead><tr><th>#</th><th>Item</th><th>Qty</th><th style="text-align:right">Price</th><th style="text-align:right">Total</th></tr></thead><tbody>${rowsHtml || '<tr><td colspan="5" class="center muted">No items</td></tr>'}</tbody></table><hr>
+      <table class="summary"><tr><td class="label">Subtotal</td><td class="money-cell">${safeMoney(subtotal)}</td></tr><tr><td class="label">Delivery/Fee</td><td class="money-cell">${safeMoney(shipping)}</td></tr><tr><td class="label">Payment</td><td class="money-cell">${escapeHtml(order.paymentMethod || "Cash")}</td></tr>${cashReceived ? `<tr><td class="label">Cash Received</td><td class="money-cell">${safeMoney(cashReceived)}</td></tr><tr><td class="label">Change</td><td class="money-cell">${safeMoney(change)}</td></tr>` : ""}<tr class="grand"><td>TOTAL</td><td class="money-cell">${safeMoney(total)}</td></tr></table>
+      <hr><div class="center"><div class="barcode">*${escapeHtml(receiptNo)}*</div><div class="policy">Keep this receipt for order reference. For warranty or return concerns, present this receipt with the item.</div><div class="footer">Thank you for shopping with us!</div><div class="copy">Powered by MR VAPE SHOP POS</div><div class="cut">✂ - - - - - - - - - - - - - - -</div></div>
+    </div><script>window.onload=function(){setTimeout(function(){window.print()},450)}<\/script></body></html>`;
     const win = window.open("", "_blank", "width=430,height=760");
     if(!win){ showNotice("Popup blocked. Allow popups to print receipt."); return; }
     win.document.open(); win.document.write(html); win.document.close();
@@ -2021,6 +2104,83 @@ function initAdmin(){
     }catch(error){ showNotice("Payment update failed"); }
   }
 
+  async function voidHistorySale(orderId){
+    const order = (historyOrdersCache || []).find(x => String(x.id || x.docId || x.firestoreId) === String(orderId));
+    if(!order) { showNotice("Sale not found"); return; }
+    const currentStatus = String(order.status || "").toLowerCase();
+    if(currentStatus.includes("void") || currentStatus.includes("cancel")) { showNotice("This sale is already voided/cancelled"); return; }
+    const reason = prompt("Void reason (required):", "Accidental POS checkout");
+    if(reason === null) return;
+    if(!String(reason).trim()) { showNotice("Void cancelled. Reason is required."); return; }
+    if(!confirm("Void this POS sale and restore stock? Reports will ignore this sale.")) return;
+
+    if(getMode()==="firebase" && firebaseReady){
+      await runTransaction(db, async (transaction) => {
+        const reads = [];
+        for(const item of (order.items || [])){
+          forEachStockComponent(item, component => {
+            const pid = component.productDocId || component.docId || component.firestoreId || component.productId || component.id || item.productDocId || item.productId || item.id;
+            if(!pid) return;
+            const ref = doc(db, "products", pid);
+            reads.push({ item, component, ref });
+          });
+        }
+        for(const row of reads){ row.snap = await transaction.get(row.ref); }
+        const updateMap = new Map();
+        for(const row of reads){
+          if(!row.snap.exists()) continue;
+          const data = row.snap.data();
+          const qty = Number(row.component?.qty || row.item.qty || 1);
+          const variant = row.component?.size || row.component?.variant || row.item.size || row.item.variant || "Default";
+          const key = row.ref.path;
+          let state = updateMap.get(key);
+          if(!state){
+            state = {
+              ref:row.ref,
+              variantStocks:(data.variantStocks && typeof data.variantStocks === "object") ? { ...data.variantStocks } : null,
+              stock:Number(data.stock || 0),
+              hasVariants:Array.isArray(data.variants)
+            };
+            updateMap.set(key, state);
+          }
+          if(variant && (state.variantStocks || state.hasVariants)){
+            const map = state.variantStocks || {};
+            map[variant] = Number(map[variant] || 0) + qty;
+            state.variantStocks = map;
+          } else {
+            state.stock += qty;
+          }
+        }
+        updateMap.forEach(state => {
+          if(state.variantStocks) transaction.update(state.ref, { variantStocks:state.variantStocks, stock:sumVariantStocks(state.variantStocks), updatedAt:serverTimestamp() });
+          else transaction.update(state.ref, { stock:state.stock, updatedAt:serverTimestamp() });
+        });
+        const histId = order.firestoreId || order.docId || order.id || orderId;
+        const histRef = doc(db, "order_history", histId);
+        transaction.update(histRef, { status:"Voided", paymentStatus:"Voided", voided:true, voidReason:String(reason).trim(), stockRestored:true, voidedAt:serverTimestamp() });
+      });
+      return;
+    }
+
+    const products = getLocalProducts();
+    (order.items || []).forEach(item => {
+      forEachStockComponent(item, component => {
+        const pid = component.productDocId || component.docId || component.firestoreId || component.productId || component.id || item.productDocId || item.productId || item.id;
+        const p = products.find(x => [x.id,x.docId,x.firestoreId,x._docId,x.sku,x.barcode].map(v=>String(v||"")).includes(String(pid||"")));
+        if(!p) return;
+        const qty = Number(component.qty || item.qty || 1);
+        const variant = component.size || component.variant || item.size || item.variant || "Default";
+        const map = variantStockMap(p);
+        if(variant && (Object.keys(map).length || Array.isArray(p.variants))){ p.variantStocks = { ...map, [variant]: Number(map[variant] || 0) + qty }; p.stock = sumVariantStocks(p.variantStocks); }
+        else p.stock = Number(p.stock || 0) + qty;
+      });
+    });
+    setLocalProducts(products);
+    const history = getLocalHistory();
+    const idx = history.findIndex(o => String(o.id) === String(orderId));
+    if(idx >= 0){ history[idx] = { ...history[idx], status:"Voided", paymentStatus:"Voided", voided:true, voidReason:String(reason).trim(), stockRestored:true, voidedAt:new Date().toISOString() }; setLocalHistory(history); }
+  }
+
   function renderOrders(activeOrders, historyOrders){
     activeOrdersCache = activeOrders.slice();
     const allOrdersForPrint = activeOrders.concat(historyOrders || []);
@@ -2037,8 +2197,9 @@ function initAdmin(){
     }
     if(!historyOrders.length) historyBody.innerHTML = '<tr><td colspan="6" class="empty">No order history yet.</td></tr>';
     else {
-      historyBody.innerHTML = historyOrders.map(order => `<tr><td><div style="font-weight:800">${escapeHtml(order.receiptNo || order.id || "-")}</div><div class="small">${escapeHtml(order.id||"")}</div></td><td><div style="font-weight:800">${escapeHtml(order.customer?.name||"-")}</div><div class="small">${escapeHtml(order.customer?.phone||"")}</div></td><td>${money(order.total||0)}</td><td>${escapeHtml(order.status||"Completed")}</td><td>${(order.items||[]).map(i => `${escapeHtml(i.name)} x${Number(i.qty)}<br><span class="small">${escapeHtml(i.size || "")}</span>`).join("<br>")}</td><td><button class="btn ghost" data-history-print="${escapeHtml(order.id||"")}">Reprint</button></td></tr>`).join("");
+      historyBody.innerHTML = historyOrders.map(order => { const isVoided = String(order.status || "").toLowerCase().includes("void") || order.voided; return `<tr><td><div style="font-weight:800">${escapeHtml(order.receiptNo || order.id || "-")}</div><div class="small">${escapeHtml(order.id||"")}</div>${isVoided ? `<div class="small" style="color:#ff9aa8;font-weight:900">VOIDED${order.voidReason ? ": "+escapeHtml(order.voidReason) : ""}</div>` : ""}</td><td><div style="font-weight:800">${escapeHtml(order.customer?.name||"-")}</div><div class="small">${escapeHtml(order.customer?.phone||"")}</div></td><td>${money(order.total||0)}</td><td>${escapeHtml(order.status||"Completed")}</td><td>${(order.items||[]).map(i => `${escapeHtml(i.name)} x${Number(i.qty)}<br><span class="small">${escapeHtml(i.size || "")}</span>`).join("<br>")}</td><td><div class="row-actions"><button class="btn ghost" data-history-print="${escapeHtml(order.id||"")}">Reprint</button>${isVoided ? "" : `<button class="btn danger" data-void-sale="${escapeHtml(order.id||"")}">Void Sale</button>`}</div></td></tr>`; }).join("");
       historyBody.querySelectorAll("[data-history-print]").forEach(btn => btn.onclick = () => printReceipt(allOrdersForPrint.find(x => x.id === btn.dataset.historyPrint)));
+      historyBody.querySelectorAll("[data-void-sale]").forEach(btn => btn.onclick = async () => { try { await voidHistorySale(btn.dataset.voidSale); showNotice("Sale voided, stock restored, reports updated"); } catch(error) { console.error(error); showNotice(error.message || "Void sale failed"); } });
     }
   }
 
@@ -2102,7 +2263,7 @@ function initAdmin(){
   function orderAllowedByReportStatus(order, filter){
     const status = String(order.status || "").toLowerCase();
     const pay = String(order.paymentStatus || "").toLowerCase();
-    if(status.includes("cancel")) return false;
+    if(status.includes("cancel") || status.includes("void") || order.voided) return false;
     if(filter === "completed") return status.includes("completed");
     if(filter === "paid-completed") return status.includes("completed") || status.includes("paid") || pay.includes("paid");
     return true;
@@ -2161,6 +2322,114 @@ function initAdmin(){
     // Bundle rows do not have allocated revenue per component. Keep total revenue/profit accurate at summary level.
     return { monthValue:String(monthValue || currentMonthValue()), ordersCount, itemsSold, revenue, cost, profit:revenue - cost, rows };
   }
+
+  function resizeCanvasForChart(canvas){
+    if(!canvas) return null;
+    const rect = canvas.getBoundingClientRect();
+    const dpr = window.devicePixelRatio || 1;
+    const width = Math.max(320, Math.floor(rect.width || canvas.clientWidth || canvas.width || 520));
+    const height = Math.max(220, Math.floor(rect.height || 260));
+    canvas.width = Math.floor(width * dpr);
+    canvas.height = Math.floor(height * dpr);
+    const ctx = canvas.getContext("2d");
+    ctx.setTransform(dpr,0,0,dpr,0,0);
+    return {ctx,width,height};
+  }
+  function drawEmptyChart(canvas, text){
+    const setup = resizeCanvasForChart(canvas); if(!setup) return;
+    const {ctx,width,height} = setup;
+    ctx.clearRect(0,0,width,height);
+    ctx.fillStyle = "rgba(255,255,255,.78)";
+    ctx.font = "800 15px Arial";
+    ctx.textAlign = "center";
+    ctx.fillText(text || "No data yet", width/2, height/2);
+  }
+  function drawMoneyChart(report){
+    const canvas = $("reportMoneyChart"); if(!canvas) return;
+    const setup = resizeCanvasForChart(canvas); if(!setup) return;
+    const {ctx,width,height} = setup;
+    ctx.clearRect(0,0,width,height);
+    const pad = 38, bottom = 44, top = 20;
+    const values = [Number(report.revenue||0), Number(report.cost||0), Number(report.profit||0)];
+    const labels = ["Revenue", "Cost", "Profit"];
+    const max = Math.max(...values, 1);
+    ctx.strokeStyle = "rgba(255,255,255,.10)";
+    ctx.lineWidth = 1;
+    for(let i=0;i<4;i++){
+      const y = top + (height-top-bottom) * i/3;
+      ctx.beginPath(); ctx.moveTo(pad,y); ctx.lineTo(width-18,y); ctx.stroke();
+    }
+    const chartW = width - pad - 22;
+    const barW = Math.min(90, chartW / 5);
+    values.forEach((v,i)=>{
+      const x = pad + chartW * (i + .5) / 3 - barW/2;
+      const h = (height-top-bottom) * (v / max);
+      const y = height - bottom - h;
+      const grad = ctx.createLinearGradient(0,y,0,height-bottom);
+      grad.addColorStop(0, i===0 ? "#20d7ff" : i===1 ? "#a78bfa" : "#46f7a5");
+      grad.addColorStop(1, i===0 ? "#7c5cff" : i===1 ? "#5b3df5" : "#0ea86f");
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      const r=12;
+      ctx.moveTo(x+r,y); ctx.lineTo(x+barW-r,y); ctx.quadraticCurveTo(x+barW,y,x+barW,y+r);
+      ctx.lineTo(x+barW,height-bottom); ctx.lineTo(x,height-bottom); ctx.lineTo(x,y+r); ctx.quadraticCurveTo(x,y,x+r,y);
+      ctx.fill();
+      ctx.fillStyle = "rgba(255,255,255,.92)";
+      ctx.font = "900 12px Arial";
+      ctx.textAlign = "center";
+      ctx.fillText(money(v), x+barW/2, Math.max(14, y-7));
+      ctx.fillStyle = "rgba(255,255,255,.72)";
+      ctx.font = "800 12px Arial";
+      ctx.fillText(labels[i], x+barW/2, height-18);
+    });
+  }
+  function drawTopItemsChart(report){
+    const canvas = $("reportTopItemsChart"); if(!canvas) return;
+    const rows = (report.rows || []).slice(0,6);
+    if(!rows.length){ drawEmptyChart(canvas, "No sold items this month"); return; }
+    const setup = resizeCanvasForChart(canvas); if(!setup) return;
+    const {ctx,width,height} = setup;
+    ctx.clearRect(0,0,width,height);
+    const padL = 116, padR = 24, top = 20, rowH = Math.max(28, (height - top - 20) / rows.length);
+    const max = Math.max(...rows.map(r=>Number(r.qty||0)),1);
+    ctx.font = "800 11px Arial";
+    rows.forEach((r,i)=>{
+      const y = top + i*rowH + 5;
+      const barH = Math.min(20, rowH-8);
+      const w = (width - padL - padR) * Number(r.qty||0) / max;
+      ctx.fillStyle = "rgba(255,255,255,.82)";
+      ctx.textAlign = "right";
+      const label = String(r.name || "Item").slice(0,14);
+      ctx.fillText(label, padL-10, y+barH-5);
+      const grad = ctx.createLinearGradient(padL,y,padL+w,y);
+      grad.addColorStop(0,"#20d7ff"); grad.addColorStop(1,"#8b5cf6");
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      const rr=10;
+      ctx.moveTo(padL+rr,y); ctx.lineTo(padL+w-rr,y); ctx.quadraticCurveTo(padL+w,y,padL+w,y+rr);
+      ctx.lineTo(padL+w,y+barH-rr); ctx.quadraticCurveTo(padL+w,y+barH,padL+w-rr,y+barH);
+      ctx.lineTo(padL+rr,y+barH); ctx.quadraticCurveTo(padL,y+barH,padL,y+barH-rr);
+      ctx.lineTo(padL,y+rr); ctx.quadraticCurveTo(padL,y,padL+rr,y);
+      ctx.fill();
+      ctx.fillStyle = "rgba(255,255,255,.95)";
+      ctx.textAlign = "left";
+      ctx.font = "900 12px Arial";
+      ctx.fillText(String(Number(r.qty||0)), padL + w + 8, y+barH-5);
+      ctx.font = "800 10px Arial";
+      ctx.fillStyle = "rgba(255,255,255,.55)";
+      ctx.fillText(String(r.variant || "Default").slice(0,22), padL, y+barH+12);
+    });
+  }
+  function renderSalesCharts(report){
+    if(!report || !report.ordersCount){
+      drawEmptyChart($("reportMoneyChart"), "No sales found");
+      drawEmptyChart($("reportTopItemsChart"), "No sold items found");
+      return;
+    }
+    drawMoneyChart(report);
+    drawTopItemsChart(report);
+  }
+
   function renderMonthlyReport(){
     const monthEl = $("reportMonth");
     const filterEl = $("reportStatusFilter");
@@ -2171,6 +2440,7 @@ function initAdmin(){
     if($("reportRevenue")) $("reportRevenue").textContent = money(report.revenue);
     if($("reportCost")) $("reportCost").textContent = money(report.cost);
     if($("reportProfit")) $("reportProfit").textContent = money(report.profit);
+    renderSalesCharts(report);
     if($("reportSubtitle")) $("reportSubtitle").textContent = `${report.ordersCount} order(s) found for ${report.monthValue}. Profit uses product Cost Price / Capital.`;
     const tbody = $("reportItemsTable");
     if(!tbody) return;
@@ -2317,24 +2587,31 @@ function initAdmin(){
   function switchTab(tabName){ document.querySelectorAll(".admin-tab-panel").forEach(panel => panel.classList.add("hidden")); const target = $("tab-"+tabName); if(target) target.classList.remove("hidden"); document.querySelectorAll(".admin-tab-btn").forEach(btn => btn.classList.toggle("active", btn.dataset.tab===tabName)); }
 
   function posProductCode(product){ return String(product.barcode || product.sku || product.id || ""); }
-  function selectPosProduct(product){
+  function selectPosProduct(product, preferredVariant=""){
     selectedPosProduct = product || null;
     const box = $("posSelectedBox"), variantSelect = $("posVariantSelect");
     if(!box || !variantSelect) return;
     if(!product){ box.textContent = "No product selected."; variantSelect.innerHTML = ""; return; }
     const variants = Array.isArray(product.variants) && product.variants.length ? product.variants : ["Default"];
-    variantSelect.innerHTML = variants.map(v => `<option value="${escapeHtml(v)}">${escapeHtml(v)} - Stock: ${getVariantStock(product, v)}</option>`).join("");
+    variantSelect.innerHTML = variants.map(v => `<option value="${escapeHtml(v)}">${escapeHtml(v)} - Stock: ${getVariantStock(product, v)}${getVariantBarcode(product, v) ? " • " + escapeHtml(getVariantBarcode(product, v)) : ""}</option>`).join("");
+    if(preferredVariant && variants.includes(preferredVariant)) variantSelect.value = preferredVariant;
     box.innerHTML = `<strong>${escapeHtml(product.name)}</strong><span>${money(product.price)} • Code: ${escapeHtml(posProductCode(product))}</span>`;
   }
   function renderPosSearch(term=""){
     const results = $("posSearchResults"); if(!results) return;
     const q = String(term || "").trim().toLowerCase();
-    const list = (q ? adminProductsCache.filter(p => [p.id,p.name,p.brand,p.category,p.barcode,p.sku].some(v => String(v || "").toLowerCase().includes(q))) : adminProductsCache.slice(0,8)).slice(0,8);
+    const list = (q ? adminProductsCache.filter(p => [p.id,p.name,p.brand,p.category,p.barcode,p.sku, ...Object.values(variantBarcodeMap(p))].some(v => String(v || "").toLowerCase().includes(q))) : adminProductsCache.slice(0,8)).slice(0,8);
     if(!list.length){ results.innerHTML = '<div class="empty mini">No product found.</div>'; return; }
     results.innerHTML = list.map(p => `<button type="button" class="pos-result" data-pos-pick="${escapeHtml(p.id)}"><span><strong>${escapeHtml(p.name)}</strong><small>${escapeHtml(p.brand || p.category || "")} • Stock ${Number(p.stock||0)}</small></span><b>${money(p.price)}</b></button>`).join("");
     results.querySelectorAll('[data-pos-pick]').forEach(btn => btn.onclick = () => selectPosProduct(adminProductsCache.find(p => p.id === btn.dataset.posPick)));
-    const exact = q && adminProductsCache.find(p => String(p.id).toLowerCase() === q || String(p.barcode || "").toLowerCase() === q || String(p.sku || "").toLowerCase() === q);
-    if(exact) selectPosProduct(exact);
+    const exactScan = q ? findProductByVariantBarcode(adminProductsCache, q) : null;
+    if(exactScan){
+      selectPosProduct(exactScan.product, exactScan.variant || null);
+      if(exactScan.variant){
+        addSelectedPosToCart(1, true);
+        if(window.playBarcodeBeep) window.playBarcodeBeep();
+      }
+    }
   }
   function renderPosCart(){
     const view = $("posCartView"), count = $("posCartCount"), totalEl = $("posTotal"), changeEl = $("posChange");
@@ -2348,22 +2625,96 @@ function initAdmin(){
     view.innerHTML = posCart.map((item, idx) => `<div class="pos-cart-item"><div><strong>${escapeHtml(item.name)}</strong><small>${escapeHtml(item.size || "Default")} • ${money(item.price)} x ${Number(item.qty)}</small></div><div><b>${money(Number(item.price)*Number(item.qty))}</b><button type="button" data-pos-remove="${idx}">×</button></div></div>`).join("");
     view.querySelectorAll('[data-pos-remove]').forEach(btn => btn.onclick = () => { posCart.splice(Number(btn.dataset.posRemove), 1); renderPosCart(); });
   }
+  function addSelectedPosToCart(qtyOverride, silent=false){
+    if(!selectedPosProduct){ if(!silent) showNotice("Select a product first"); return false; }
+    const variant = $("posVariantSelect")?.value || "Default";
+    const qty = Math.max(1, Number(qtyOverride || $("posQty")?.value || 1));
+    const available = getVariantStock(selectedPosProduct, variant);
+    const existingQty = posCart.filter(i => i.id === selectedPosProduct.id && i.size === variant).reduce((a,b)=>a+Number(b.qty||0),0);
+    if(available < existingQty + qty){ showNotice("Not enough stock for " + variant); return false; }
+    const existing = posCart.find(i => i.id === selectedPosProduct.id && i.size === variant);
+    if(existing) existing.qty = Number(existing.qty) + qty;
+    else posCart.push({ id:selectedPosProduct.id, productId:selectedPosProduct.id, productDocId:selectedPosProduct.docId || selectedPosProduct.firestoreId || selectedPosProduct.id, name:selectedPosProduct.name, price:Number(selectedPosProduct.price || 0), cost:Number(selectedPosProduct.costPrice || selectedPosProduct.cost || 0), qty, size:variant, barcode:getVariantBarcode(selectedPosProduct, variant) || selectedPosProduct.barcode || "", image:(selectedPosProduct.variantImages && selectedPosProduct.variantImages[variant]) || firstProductImage(selectedPosProduct) });
+    if($("posQty")) $("posQty").value = 1;
+    renderPosCart();
+    if(!silent) showNotice("Added to POS cart");
+    return true;
+  }
+
+
+  async function ensureScannerLibrary(){
+    if(window.Html5Qrcode) return true;
+    await new Promise((resolve, reject) => {
+      const script = document.createElement('script');
+      script.src = 'https://unpkg.com/html5-qrcode';
+      script.onload = resolve;
+      script.onerror = reject;
+      document.head.appendChild(script);
+    });
+    return !!window.Html5Qrcode;
+  }
+  function setupCameraBarcodeScanner(){
+    const btn = $("posCameraScanBtn"), modal = $("barcodeScannerModal"), closeBtn = $("closeBarcodeScannerBtn"), reader = $("barcodeReader"), status = $("barcodeScannerStatus");
+    if(!btn || !modal || !reader) return;
+    let scanner = null;
+    let scanning = false;
+    const stop = async () => {
+      try{ if(scanner && scanning){ await scanner.stop(); } }catch(e){ console.warn(e); }
+      scanning = false;
+      modal.classList.add('hidden');
+      reader.innerHTML = '';
+    };
+    window.playBarcodeBeep = function(){
+      try{
+        const ctx = new (window.AudioContext || window.webkitAudioContext)();
+        const osc = ctx.createOscillator(); const gain = ctx.createGain();
+        osc.frequency.value = 880; gain.gain.value = 0.07;
+        osc.connect(gain); gain.connect(ctx.destination); osc.start(); setTimeout(()=>{osc.stop(); ctx.close();}, 90);
+      }catch(e){}
+    };
+    btn.onclick = async () => {
+      modal.classList.remove('hidden');
+      if(status) status.textContent = 'Opening camera... allow browser permission.';
+      try{
+        await ensureScannerLibrary();
+        scanner = new Html5Qrcode('barcodeReader');
+        scanning = true;
+        await scanner.start({ facingMode:'environment' }, { fps:10, qrbox:{ width:240, height:140 }, formatsToSupport: undefined }, async (decodedText) => {
+          const code = String(decodedText || '').trim();
+          if(!code) return;
+          if(status) status.textContent = 'Scanned: ' + code;
+          const found = findProductByVariantBarcode(adminProductsCache, code);
+          if(found){
+            selectPosProduct(found.product, found.variant || null);
+            if(found.variant) addSelectedPosToCart(1, true);
+            else showNotice('Product found. Choose variant then Add to POS Cart.');
+            window.playBarcodeBeep && window.playBarcodeBeep();
+            await stop();
+          }else{
+            showNotice('Barcode not found: ' + code);
+            if(status) status.textContent = 'Barcode not found. Add this barcode in Admin product variant first: ' + code;
+          }
+        });
+      }catch(error){
+        console.error('Camera scanner failed:', error);
+        if(status) status.textContent = 'Camera scanner failed. Use manual barcode input or allow camera permission.';
+      }
+    };
+    closeBtn && (closeBtn.onclick = stop);
+    modal.onclick = (e) => { if(e.target === modal) stop(); };
+  }
+
   function setupBarcodePos(){
     const scan = $("posScanInput"), addBtn = $("posAddBtn"), payBtn = $("posPayBtn"), clearBtn = $("posClearBtn"), cash = $("posCash");
     if(!scan || !addBtn || !payBtn) return;
     scan.addEventListener('input', () => renderPosSearch(scan.value));
     scan.addEventListener('keydown', (e) => { if(e.key === 'Enter'){ e.preventDefault(); renderPosSearch(scan.value); $("posQty")?.focus(); } });
     addBtn.onclick = () => {
-      if(!selectedPosProduct){ showNotice("Select a product first"); return; }
-      const variant = $("posVariantSelect")?.value || "Default";
-      const qty = Math.max(1, Number($("posQty")?.value || 1));
-      const available = getVariantStock(selectedPosProduct, variant);
-      const existingQty = posCart.filter(i => i.id === selectedPosProduct.id && i.size === variant).reduce((a,b)=>a+Number(b.qty||0),0);
-      if(available < existingQty + qty){ showNotice("Not enough stock for " + variant); return; }
-      const existing = posCart.find(i => i.id === selectedPosProduct.id && i.size === variant);
-      if(existing) existing.qty = Number(existing.qty) + qty;
-      else posCart.push({ id:selectedPosProduct.id, productId:selectedPosProduct.id, productDocId:selectedPosProduct.docId || selectedPosProduct.firestoreId || selectedPosProduct.id, name:selectedPosProduct.name, price:Number(selectedPosProduct.price || 0), cost:Number(selectedPosProduct.costPrice || selectedPosProduct.cost || 0), qty, size:variant, image:(selectedPosProduct.variantImages && selectedPosProduct.variantImages[variant]) || firstProductImage(selectedPosProduct) });
-      $("posQty").value = 1; scan.value = ""; renderPosSearch(""); renderPosCart(); showNotice("Added to POS cart"); scan.focus();
+      if(addSelectedPosToCart()){
+        scan.value = "";
+        renderPosSearch("");
+        scan.focus();
+      }
     };
     if(cash) cash.addEventListener('input', renderPosCart);
     clearBtn && (clearBtn.onclick = () => { posCart = []; selectedPosProduct = null; selectPosProduct(null); if(scan) scan.value = ""; renderPosSearch(""); renderPosCart(); });
@@ -2407,6 +2758,7 @@ function initAdmin(){
     renderMessages(messages);
   });
   document.querySelectorAll(".admin-tab-btn").forEach(btn => btn.onclick = () => {
+    if((document.body.dataset.role === "staff" || page === "staff") && btn.dataset.tab !== "pos") return;
     switchTab(btn.dataset.tab);
     if(btn.dataset.tab === "promos"){ fillPromoProductSelects(); loadAdminPromos(); }
     if(btn.dataset.tab === "reports"){ renderMonthlyReport(); }
@@ -2458,6 +2810,7 @@ function initAdmin(){
   setPromoDefaultValues();
   if($("clearPromoBtn")) $("clearPromoBtn").onclick = clearPromoForm;
   setupBarcodePos();
+  setupCameraBarcodeScanner();
   setupShippingAdmin();
   setupReportsAdmin();
   switchTab("products");
@@ -2474,6 +2827,7 @@ function initAdmin(){
       variants:(window.getVariantData ? window.getVariantData().variants : ($("variants") ? $("variants").value.split(/\n|,/) : []).map(v => v.trim()).filter(Boolean)),
       variantImages:(window.getVariantData ? window.getVariantData().variantImages : {}),
       variantStocks:(window.getVariantData ? window.getVariantData().variantStocks : {}),
+      variantBarcodes:(window.getVariantData ? window.getVariantData().variantBarcodes : {}),
       variantPhotoList:(window.getVariantData ? window.getVariantData().variantPhotoList : []),
       image:(function(){ const extra = window.getProductImageUrls ? window.getProductImageUrls() : [$("image").value.trim()]; const cleanExtra = extra.map(x => String(x || "").trim()).filter(Boolean); const vd = window.getVariantData ? window.getVariantData() : {variantPhotoList:[]}; return (cleanExtra[0] || vd.variantPhotoList[0]?.image || ""); })(),
       images:(function(){ const vd = window.getVariantData ? window.getVariantData() : {variantPhotoList:[]}; const variantImgs = (vd.variantPhotoList || []).map(v => v.image).filter(Boolean); const extra = (window.getProductImageUrls ? window.getProductImageUrls() : [$("image").value.trim()]).filter(Boolean); return Array.from(new Set(extra.concat(variantImgs))); })()
@@ -2533,35 +2887,40 @@ document.addEventListener("keydown", (event) => {
       const name = (row.querySelector('.variant-name')?.value || '').trim();
       const image = (row.querySelector('.variant-image')?.value || '').trim();
       const stock = Number(row.querySelector('.variant-stock')?.value || 0);
-      return { name, image, stock };
+      const barcode = (row.querySelector('.variant-barcode')?.value || '').trim();
+      return { name, image, stock, barcode };
     }).filter(v => v.name || v.image);
     const names = data.map(v => v.name).filter(Boolean);
     const imageMap = {};
     const stockMap = {};
-    data.forEach(v => { if(v.name && v.image) imageMap[v.name] = v.image; if(v.name) stockMap[v.name] = Number(v.stock || 0); });
+    const barcodeMap = {};
+    data.forEach(v => { if(v.name && v.image) imageMap[v.name] = v.image; if(v.name) stockMap[v.name] = Number(v.stock || 0); if(v.name && v.barcode) barcodeMap[v.name] = v.barcode; });
     if($('variants')) $('variants').value = names.join('\n');
     if($('variantImages')) $('variantImages').value = JSON.stringify(imageMap);
     const totalStock = sumVariantStocks(stockMap);
     if($('stock') && names.length) $('stock').value = totalStock;
-    return { variants:names, variantImages:imageMap, variantStocks:stockMap, variantPhotoList:data.filter(v => v.image || v.stock) };
+    return { variants:names, variantImages:imageMap, variantStocks:stockMap, variantBarcodes:barcodeMap, variantPhotoList:data.filter(v => v.image || v.stock || v.barcode) };
   }
   window.getVariantData = syncVariantData;
 
-  function addVariantRow(name, image, stock){
+  function addVariantRow(name, image, stock, barcode){
     const wrap = $('variantRows');
     if(!wrap) return;
     const row = document.createElement('div');
     row.className = 'variant-row variant-photo-row';
-    row.innerHTML = '<input class="variant-name" type="text" placeholder="Flavor / color name e.g. Black Wave" value=""><input class="variant-stock" type="number" min="0" placeholder="Stock"><input class="variant-image" type="text" placeholder="Image URL for this flavor/color"><label class="image-upload-btn">Upload<input class="variant-file" type="file" accept="image/*" hidden></label><button type="button" aria-label="Remove variant">Remove</button>';
+    row.innerHTML = '<input class="variant-name" type="text" placeholder="Flavor / color name e.g. Black Wave" value=""><input class="variant-stock" type="number" min="0" placeholder="Stock"><input class="variant-barcode" type="text" placeholder="Barcode from vape box"><input class="variant-image" type="text" placeholder="Image URL for this flavor/color"><label class="image-upload-btn">Upload<input class="variant-file" type="file" accept="image/*" hidden></label><button type="button" aria-label="Remove variant">Remove</button>';
     const nameInput = row.querySelector('.variant-name');
     const stockInput = row.querySelector('.variant-stock');
+    const barcodeInput = row.querySelector('.variant-barcode');
     const imageInput = row.querySelector('.variant-image');
     const fileInput = row.querySelector('.variant-file');
     nameInput.value = name || '';
     stockInput.value = Number(stock || 0);
+    barcodeInput.value = barcode || '';
     imageInput.value = image || '';
     nameInput.addEventListener('input', syncVariantData);
     stockInput.addEventListener('input', syncVariantData);
+    barcodeInput.addEventListener('input', syncVariantData);
     imageInput.addEventListener('input', syncVariantData);
     fileInput.addEventListener('change', async function(){
       const picked = fileInput.files && fileInput.files[0];
@@ -2594,12 +2953,13 @@ document.addEventListener("keydown", (event) => {
     else if(hidden && hidden.value) names = hidden.value.split(/\n|,/).map(v => v.trim()).filter(Boolean);
     const map = item?.variantImages && typeof item.variantImages === 'object' ? item.variantImages : {};
     const stockMap = item?.variantStocks && typeof item.variantStocks === 'object' ? item.variantStocks : {};
+    const barcodeMap = item?.variantBarcodes && typeof item.variantBarcodes === 'object' ? item.variantBarcodes : {};
     if(!names.length && Array.isArray(item?.variantPhotoList)) names = item.variantPhotoList.map(v => v.name).filter(Boolean);
     wrap.innerHTML = '';
-    (names.length ? names : ['']).forEach(name => addVariantRow(name, map[name] || '', stockMap[name] || 0));
+    (names.length ? names : ['']).forEach(name => addVariantRow(name, map[name] || '', stockMap[name] || 0, barcodeMap[name] || ''));
     if(Array.isArray(item?.variantPhotoList)){
       item.variantPhotoList.forEach(v => {
-        if(v && (v.image || v.stock) && !rows().some(row => (row.querySelector('.variant-image')?.value || '') === v.image && (row.querySelector('.variant-name')?.value || '') === v.name)) addVariantRow(v.name || '', v.image || '', v.stock || stockMap[v.name] || 0);
+        if(v && (v.image || v.stock || v.barcode) && !rows().some(row => (row.querySelector('.variant-name')?.value || '') === v.name)) addVariantRow(v.name || '', v.image || '', v.stock || stockMap[v.name] || 0, v.barcode || barcodeMap[v.name] || '');
       });
     }
     syncVariantData();
