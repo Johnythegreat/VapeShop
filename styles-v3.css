@@ -1427,3 +1427,6 @@ body.drawer-open .bottom-nav{ z-index: 35 !important; }
 .pos-promo-head strong{color:#eaf8ff;font-size:14px}
 .pos-promo-head b{color:#22d3ee;font-size:18px}
 .pos-promo-card .btn{width:100%;margin-top:8px}
+
+.commission-history-scroll{max-height:320px;overflow:auto;border:1px solid rgba(255,255,255,.08);border-radius:14px;padding:10px;background:rgba(0,0,0,.08)}
+.commission-history-scroll thead th{position:sticky;top:0;background:#0b1220;z-index:2}
