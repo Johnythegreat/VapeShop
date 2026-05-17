@@ -1419,3 +1419,11 @@ body.drawer-open .bottom-nav{ z-index: 35 !important; }
 #barcodeReader{overflow:hidden;border-radius:18px;background:#020617;min-height:260px;border:1px solid rgba(255,255,255,.12)}
 .variant-row.variant-photo-row{grid-template-columns:1.1fr .45fr .9fr 1.2fr auto auto}
 @media(max-width:900px){.variant-row.variant-photo-row{grid-template-columns:1fr}.barcode-pos-actions{align-items:stretch}.barcode-pos-actions .btn{width:100%}}
+
+/* POS promo bundles */
+.pos-promo-bundles{margin:14px 0;display:grid;gap:10px}
+.pos-promo-card{border:1px solid rgba(34,211,238,.28);background:linear-gradient(135deg,rgba(34,211,238,.08),rgba(139,92,246,.08));border-radius:18px;padding:12px}
+.pos-promo-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:10px}
+.pos-promo-head strong{color:#eaf8ff;font-size:14px}
+.pos-promo-head b{color:#22d3ee;font-size:18px}
+.pos-promo-card .btn{width:100%;margin-top:8px}

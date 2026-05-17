@@ -1920,6 +1920,32 @@ async function createPosSale(cart, account={}, payment={}){
     barcode:item.barcode || "",
     bundleItems:Array.isArray(item.bundleItems) ? item.bundleItems : []
   }));
+  function expandPosStockLines(sourceCart){
+    const lines = [];
+    (sourceCart || []).forEach(item => {
+      const parentQty = Number(item.qty || 1);
+      if(isBundleCartItem(item)){
+        (item.bundleItems || []).forEach(component => {
+          lines.push({
+            type:"bundle-component",
+            parentBundle:item.name || "Bundle",
+            name:component.name || item.name || "Bundle item",
+            qty:parentQty * Number(component.qty || 1),
+            productId:component.productId || component.id || component.productDocId,
+            productDocId:component.productDocId || component.docId || component.firestoreId || component.productId || component.id,
+            id:component.productId || component.id || component.productDocId,
+            size:component.size || component.variant || "Default",
+            variant:component.size || component.variant || "Default",
+            barcode:component.barcode || ""
+          });
+        });
+      }else{
+        lines.push(item);
+      }
+    });
+    return lines;
+  }
+  const stockLines = expandPosStockLines(cart);
   const total = totalAmount(cleanItems, 0);
   const orderPayload = {
     customer:{ name:account.name || "Walk-in Customer", phone:account.phone || "", address:account.address || "" },
@@ -1942,7 +1968,7 @@ async function createPosSale(cart, account={}, payment={}){
       // IMPORTANT: aggregate all cart lines by product document.
       // This prevents V2 flavor A + V2 flavor B in the same POS sale from overwriting each other.
       const rows = [];
-      for(const item of cart){
+      for(const item of stockLines){
         const docId = item.productDocId || item.docId || item.firestoreId || item.id;
         const ref = doc(db, "products", docId);
         const snap = await transaction.get(ref);
@@ -1987,11 +2013,11 @@ async function createPosSale(cart, account={}, payment={}){
     return { id:orderId, ...orderPayload, paidAt:new Date().toISOString() };
   }
   const products = getLocalProducts();
-  for(const item of cart){
+  for(const item of stockLines){
     const p = resolveLocalProduct(item, products);
     if(!p || getVariantStock(p, item.size) < Number(item.qty || 1)) throw new Error("Not enough stock for " + item.name + (item.size ? " - " + item.size : ""));
   }
-  for(const item of cart){
+  for(const item of stockLines){
     const p = resolveLocalProduct(item, products);
     const map = variantStockMap(p);
     if(item.size && Object.prototype.hasOwnProperty.call(map, item.size)){
@@ -2010,6 +2036,17 @@ async function createPosSale(cart, account={}, payment={}){
 
 function initAdmin(){
   bindNoticeButtons(); const form = $("productForm"), table = $("adminProductTable"); let activeOrdersCache = []; let historyOrdersCache = []; let adminProductsCache = []; let lastReportRows = []; let posCart = []; let selectedPosProduct = null; let adminShippingSettings = getLocalShippingSettings();
+  let lastPosAutoBarcode = "";
+  let lastPosAutoBarcodeAt = 0;
+  function canAutoAddBarcode(code){
+    const clean = String(code || "").trim();
+    const now = Date.now();
+    if(!clean) return false;
+    if(clean === lastPosAutoBarcode && (now - lastPosAutoBarcodeAt) < 1800) return false;
+    lastPosAutoBarcode = clean;
+    lastPosAutoBarcodeAt = now;
+    return true;
+  }
   const topActions = document.querySelector(".top-actions-wrap");
   if(topActions && !document.getElementById("logoutAdminBtn")){
     const logoutBtn = document.createElement("button");
@@ -2699,12 +2736,93 @@ function initAdmin(){
     const exactScan = q ? findProductByVariantBarcode(adminProductsCache, q) : null;
     if(exactScan){
       selectPosProduct(exactScan.product, exactScan.variant || null);
-      if(exactScan.variant){
+      if(exactScan.variant && canAutoAddBarcode(q)){
         addSelectedPosToCart(1, true);
         if(window.playBarcodeBeep) window.playBarcodeBeep();
+        showNotice("Barcode added: " + exactScan.product.name + " - " + exactScan.variant);
       }
     }
   }
+
+
+  function resolveAdminPromoProducts(promo){
+    return (promo.items || []).map(item => ({ item, product:adminProductsCache.find(p => productMatchesPromoItem(p, item)) })).filter(x => x.product);
+  }
+  function posPromoVariantOptions(product){
+    const variants = Array.isArray(product.variants) && product.variants.length ? product.variants : ["Default"];
+    return variants.map(v => {
+      const stock = getVariantStock(product, v);
+      return `<option value="${escapeHtml(v)}" ${stock <= 0 ? "disabled" : ""}>${escapeHtml(v)} ${stock <= 0 ? "(Out)" : "(" + stock + " left)"}</option>`;
+    }).join("");
+  }
+  async function renderPosPromoBundles(){
+    const wrap = $("posPromoBundles");
+    if(!wrap) return;
+    let promos = [];
+    try{ promos = (await fetchPromos()).filter(p => p.active); }catch(e){ console.warn("POS promo load failed", e); }
+    const cards = promos.map(promo => {
+      const rows = resolveAdminPromoProducts(promo);
+      if(rows.length < 2) return "";
+      const selectors = rows.map((r, idx) => `<label>${escapeHtml(r.product.name)}<select data-pos-promo-select="${escapeHtml(promo.id)}" data-index="${idx}">${posPromoVariantOptions(r.product)}</select></label>`).join("");
+      return `<div class="pos-promo-card"><div class="pos-promo-head"><strong>${escapeHtml(promo.name)}</strong><b>${money(promo.price)}</b></div><div class="pos-form-grid">${selectors}</div><button type="button" class="btn dark" data-pos-add-promo="${escapeHtml(promo.id)}">Add Promo Bundle</button></div>`;
+    }).filter(Boolean).join("");
+    wrap.innerHTML = cards || '<div class="empty mini">No active POS promos yet. Create one in Admin → Promos.</div>';
+    wrap.querySelectorAll('[data-pos-add-promo]').forEach(btn => btn.onclick = async () => {
+      const promo = promos.find(p => p.id === btn.dataset.posAddPromo);
+      if(!promo) return showNotice("Promo not found");
+      const rows = resolveAdminPromoProducts(promo);
+      if(rows.length < 2) return showNotice("Promo products not found");
+      const selected = rows.map((r, idx) => {
+        const sel = document.querySelector(`[data-pos-promo-select="${CSS.escape(promo.id)}"][data-index="${idx}"]`);
+        return { ...r, size:sel?.value || "Default" };
+      });
+      for(const row of selected){
+        const required = Number(row.item.qty || 1);
+        if(getVariantStock(row.product, row.size) < required) return showNotice("Selected promo item is out of stock");
+      }
+      const item = {
+        type:"bundle",
+        bundleId:promo.id,
+        id:promo.id,
+        productId:promo.id,
+        productDocId:promo.id,
+        name:promo.name,
+        brand:"MR VAPE SHOP",
+        category:"Promo",
+        price:Number(promo.price || 0),
+        cost:0,
+        image:firstProductImage(selected[0].product),
+        qty:1,
+        size:selected.map(r => r.size).join(" + "),
+        barcode:"",
+        bundleItems:selected.map(r => ({
+          productId:productDocId(r.product),
+          productDocId:productDocId(r.product),
+          id:productDocId(r.product),
+          name:r.product.name,
+          brand:r.product.brand,
+          category:r.product.category,
+          size:r.size,
+          variant:r.size,
+          qty:Number(r.item.qty || 1),
+          cost:Number(r.product.costPrice || r.product.cost || 0),
+          barcode:getVariantBarcode(r.product, r.size) || r.product.barcode || "",
+          image:(r.product.variantImages && r.product.variantImages[r.size]) || firstProductImage(r.product)
+        }))
+      };
+      const existing = findExistingCartItem(posCart, item);
+      const nextQty = (existing ? Number(existing.qty || 0) : 0) + 1;
+      const ok = (item.bundleItems || []).every(component => {
+        const live = adminProductsCache.find(p => [p.id,p.docId,p.firestoreId,p._docId].map(x=>String(x||"")).includes(String(component.productId || component.productDocId || component.id || "")));
+        return live && getVariantStock(live, component.size || component.variant || "Default") >= nextQty * Number(component.qty || 1);
+      });
+      if(!ok) return showNotice("No more stock available for this bundle selection");
+      if(existing) existing.qty = nextQty; else posCart.push(item);
+      renderPosCart();
+      showNotice("Promo bundle added to POS cart");
+    });
+  }
+
   function renderPosCart(){
     const view = $("posCartView"), count = $("posCartCount"), totalEl = $("posTotal"), changeEl = $("posChange");
     const total = totalAmount(posCart, 0);
@@ -2753,6 +2871,7 @@ function initAdmin(){
     const stop = async () => {
       try{ if(scanner && scanning){ await scanner.stop(); } }catch(e){ console.warn(e); }
       scanning = false;
+      window.__posScannerBusy = false;
       modal.classList.add('hidden');
       reader.innerHTML = '';
     };
@@ -2774,12 +2893,18 @@ function initAdmin(){
         await scanner.start({ facingMode:'environment' }, { fps:10, qrbox:{ width:240, height:140 }, formatsToSupport: undefined }, async (decodedText) => {
           const code = String(decodedText || '').trim();
           if(!code) return;
+          if(window.__posScannerBusy) return;
+          window.__posScannerBusy = true;
           if(status) status.textContent = 'Scanned: ' + code;
           const found = findProductByVariantBarcode(adminProductsCache, code);
           if(found){
             selectPosProduct(found.product, found.variant || null);
-            if(found.variant) addSelectedPosToCart(1, true);
-            else showNotice('Product found. Choose variant then Add to POS Cart.');
+            if(found.variant && canAutoAddBarcode(code)){
+              addSelectedPosToCart(1, true);
+              showNotice("Barcode added: " + found.product.name + " - " + found.variant);
+            }else if(!found.variant){
+              showNotice('Product found. Choose variant then Add to POS Cart.');
+            }
             window.playBarcodeBeep && window.playBarcodeBeep();
             await stop();
           }else{
@@ -2821,7 +2946,7 @@ function initAdmin(){
         posCart = []; renderPosCart(); if($("posCash")) $("posCash").value = ""; showNotice("Paid. Opening receipt..."); printReceipt(order);
       }catch(error){ showNotice(error.message || "POS payment failed"); }
     };
-    renderPosSearch(""); renderPosCart();
+    renderPosSearch(""); renderPosCart(); renderPosPromoBundles();
   }
 
   if($("adminReplyImage")) $("adminReplyImage").onchange = () => setImagePreview("adminReplyImage", "adminReplyImagePreviewWrap", "adminReplyImagePreview", "adminReplyImageName");
@@ -2837,6 +2962,7 @@ function initAdmin(){
     adminProductsCache = items || [];
     renderProductsAdmin(adminProductsCache, source);
     renderPosSearch($("posScanInput")?.value || "");
+    renderPosPromoBundles();
     fillPromoProductSelects();
     if($("tab-promos") && !$("tab-promos").classList.contains("hidden")) loadAdminPromos();
   });

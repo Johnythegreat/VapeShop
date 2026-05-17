@@ -1,47 +1,20 @@
-MR VAPE SHOP - MASTER README
+VapeShop POS Barcode + Promo Bundle Fix
 
-LOGIN PAGES
-- index.html = Customer shop
-- admin-login.html = Admin login
-- staff-login.html = Staff/Cashier login
-- staff-pos.html = Barcode POS only
+What was fixed:
+1. Barcode scanner no longer adds the same scanned product twice.
+   - Added scan debounce protection.
+   - Camera scan now locks while processing one barcode.
 
-STAFF LOGIN SETUP
-1. Firebase Console > Authentication > Sign-in method
-2. Enable Email/Password.
-3. Firebase Console > Authentication > Users > Add user.
-4. Create staff email/password.
-5. Copy the staff User UID.
-6. Firestore > create/use collection: users (lowercase)
-7. Create document with Document ID = staff UID.
-8. Add field:
-   role: "staff"
+2. Promo / Bundle can now be added inside Barcode POS.
+   - Admin POS and Staff POS both show active promo bundles.
+   - Example: V2 + V3 bundle can be added directly to POS cart.
+   - Bundle stock deducts from the real selected product variants.
 
-OPTIONAL STAFF FIELDS
-- name: "Cashier Name"
-- commissionRate: 50
+3. POS stock deduction supports bundle components.
+   - A bundle sale deducts V2 selected flavor and V3 selected color.
+   - Report keeps the bundle as one sale item while stock stays accurate.
 
-ADMIN ROLE SETUP
-Firestore collection: users
-Document ID = admin UID
-Fields:
-- role: "admin"
-
-IMPORTANT
-- The collection name must be exactly: users
-- The field name must be exactly: role
-- The staff value must be lowercase: staff
-- Open the deployed website URL, not local file:// HTML.
-- After uploading to GitHub Pages, press Ctrl + F5.
-
-AUTHORIZED DOMAIN
-If login gives unauthorized-domain, go to Firebase > Authentication > Settings > Authorized domains and add:
-johnythegreat.github.io
-
-WHAT WAS FIXED IN THIS BUILD
-- Rebuilt staff-login.html with standalone browser Firebase Auth.
-- Removed the broken module auth flow that caused ServerAppCurrentUserOperationNotSupportedError.
-- Staff login now gives clearer error messages.
-- Staff with role staff redirects to staff-pos.html.
-
-END
+After upload:
+- Hard refresh admin/staff POS with Ctrl + F5.
+- Test with 1 barcode scan only once.
+- Test adding a promo bundle from Barcode POS.
