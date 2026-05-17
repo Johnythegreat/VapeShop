@@ -1,20 +1,35 @@
-VapeShop POS Barcode + Promo Bundle Fix
+VAPESHOP SYSTEM - COMMISSION PAYOUT UPDATE
 
-What was fixed:
-1. Barcode scanner no longer adds the same scanned product twice.
-   - Added scan debounce protection.
-   - Camera scan now locks while processing one barcode.
+NEW FEATURE
+- Staff Commission Payout System
+- Commission report now shows UNPAID commissions only
+- Button: Mark Paid per staff
+- Button: Mark All as Paid
+- Paid commissions are saved to commission_payouts history
+- Sales marked paid are no longer included in new unpaid commission report
+- Voided sales are still ignored
+- Product inventory is not affected by commission payout
 
-2. Promo / Bundle can now be added inside Barcode POS.
-   - Admin POS and Staff POS both show active promo bundles.
-   - Example: V2 + V3 bundle can be added directly to POS cart.
-   - Bundle stock deducts from the real selected product variants.
+HOW TO USE
+1. Go to Admin > Reports
+2. Generate the month report
+3. Check Staff Commission Report
+4. After you pay the cashier commission, click Mark Paid or Mark All as Paid
+5. The record will appear under Commission Payout History
 
-3. POS stock deduction supports bundle components.
-   - A bundle sale deducts V2 selected flavor and V3 selected color.
-   - Report keeps the bundle as one sale item while stock stays accurate.
+FIRESTORE COLLECTION ADDED
+- commission_payouts
 
-After upload:
-- Hard refresh admin/staff POS with Ctrl + F5.
-- Test with 1 barcode scan only once.
-- Test adding a promo bundle from Barcode POS.
+IMPORTANT
+If your Firestore rules are strict, allow admin read/write to commission_payouts.
+Staff should not edit commission payouts.
+
+Suggested rules pattern:
+match /commission_payouts/{doc} {
+  allow read, write: if request.auth != null && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == "admin";
+}
+
+LOGIN/ROLE REMINDER
+- users / UID / role: "admin" for owner
+- users / UID / role: "staff" for cashier
+

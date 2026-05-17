@@ -305,6 +305,7 @@
             <div class="form-actions">
               <button type="button" class="btn dark" id="generateCommissionBtn">Generate Commission</button>
               <button type="button" class="btn ghost" id="exportCommissionBtn">Export Commission CSV</button>
+              <button type="button" class="btn" id="markAllCommissionPaidBtn">Mark All as Paid</button>
             </div>
           </div>
           <section class="stats-grid report-stats" style="margin-top:14px">
@@ -315,8 +316,15 @@
           </section>
           <div class="table-wrap" style="margin-top:14px">
             <table class="admin-table">
-              <thead><tr><th>Cashier / Staff</th><th>Sales Count</th><th>Single Items</th><th>Bundles</th><th>Commission Items</th><th>Commission</th></tr></thead>
-              <tbody id="commissionTable"><tr><td colspan="6" class="empty">Choose a month, then generate commission.</td></tr></tbody>
+              <thead><tr><th>Cashier / Staff</th><th>Sales Count</th><th>Single Items</th><th>Bundles</th><th>Commission Items</th><th>Commission</th><th>Action</th></tr></thead>
+              <tbody id="commissionTable"><tr><td colspan="7" class="empty">Choose a month, then generate commission.</td></tr></tbody>
+            </table>
+          </div>
+          <div class="table-wrap" style="margin-top:14px">
+            <h3 style="margin:0 0 8px;color:#7ee7ff">Commission Payout History</h3>
+            <table class="admin-table">
+              <thead><tr><th>Paid Date</th><th>Month</th><th>Staff</th><th>Commission</th><th>Paid By</th></tr></thead>
+              <tbody id="commissionPayoutHistory"><tr><td colspan="5" class="empty">No payouts yet.</td></tr></tbody>
             </table>
           </div>
         </section>

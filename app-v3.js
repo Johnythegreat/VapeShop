@@ -2522,6 +2522,9 @@ function initAdmin(){
   function getCommissionOrderCashier(order){
     return String(order.cashierEmail || order.cashierName || order.cashier || order.staffEmail || order.createdByEmail || "Admin POS").trim() || "Admin POS";
   }
+  function commissionIsPaid(order){
+    return !!(order.commissionPaid || order.commissionPayoutId || order.commissionPaidAt);
+  }
   function buildCommissionReport(monthValue, statusFilter){
     const [yearStr, monthStr] = String(monthValue || currentMonthValue()).split("-");
     const year = Number(yearStr), month = Number(monthStr) - 1;
@@ -2535,8 +2538,10 @@ function initAdmin(){
       const d = reportOrderDate(order);
       if(!d || d.getFullYear() !== year || d.getMonth() !== month) return;
       if(!orderAllowedByReportStatus(order, statusFilter)) return;
+      if(commissionIsPaid(order)) return;
       const cashier = getCommissionOrderCashier(order);
-      const row = map.get(cashier) || { cashier, salesCount:0, singleUnits:0, bundleUnits:0, commissionUnits:0, commission:0 };
+      const row = map.get(cashier) || { cashier, salesCount:0, singleUnits:0, bundleUnits:0, commissionUnits:0, commission:0, orderIds:[] };
+      row.orderIds.push(order.id || order.docId || order.firestoreId);
       row.salesCount += 1;
       totalSales += 1;
       (Array.isArray(order.items) ? order.items : []).forEach(item => {
@@ -2572,8 +2577,85 @@ function initAdmin(){
     if($("commissionTotalPay")) $("commissionTotalPay").textContent = money(report.totalCommission);
     const tbody = $("commissionTable");
     if(!tbody) return;
-    if(!report.rows.length){ tbody.innerHTML = '<tr><td colspan="6" class="empty">No commission sales found for this month.</td></tr>'; return; }
-    tbody.innerHTML = report.rows.map(r => `<tr><td><strong>${escapeHtml(r.cashier)}</strong></td><td>${Number(r.salesCount || 0)}</td><td>${Number(r.singleUnits || 0)}</td><td>${Number(r.bundleUnits || 0)}</td><td>${Number(r.commissionUnits || 0)}</td><td><strong>${money(r.commission || 0)}</strong></td></tr>`).join("");
+    if(!report.rows.length){ tbody.innerHTML = '<tr><td colspan="7" class="empty">No unpaid commission found for this month.</td></tr>'; renderCommissionPayoutHistory(); return; }
+    tbody.innerHTML = report.rows.map(r => `<tr><td><strong>${escapeHtml(r.cashier)}</strong></td><td>${Number(r.salesCount || 0)}</td><td>${Number(r.singleUnits || 0)}</td><td>${Number(r.bundleUnits || 0)}</td><td>${Number(r.commissionUnits || 0)}</td><td><strong>${money(r.commission || 0)}</strong></td><td><button type="button" class="btn small" data-pay-commission="${encodeURIComponent(r.cashier)}">Mark Paid</button></td></tr>`).join("");
+    tbody.querySelectorAll("[data-pay-commission]").forEach(btn => btn.onclick = () => markCommissionPaid(decodeURIComponent(btn.dataset.payCommission)));
+    renderCommissionPayoutHistory();
+  }
+  function commissionLocalPayouts(){ return readJSON("mrv_commission_payouts_v1", []); }
+  function setCommissionLocalPayouts(items){ writeJSON("mrv_commission_payouts_v1", items || []); }
+  function commissionOrdersForStaff(monthValue, statusFilter, cashier){
+    const [yearStr, monthStr] = String(monthValue || currentMonthValue()).split("-");
+    const year = Number(yearStr), month = Number(monthStr) - 1;
+    const allOrders = [...(activeOrdersCache || []), ...(historyOrdersCache || [])];
+    return allOrders.filter(order => {
+      const d = reportOrderDate(order);
+      if(!d || d.getFullYear() !== year || d.getMonth() !== month) return false;
+      if(!orderAllowedByReportStatus(order, statusFilter)) return false;
+      if(commissionIsPaid(order)) return false;
+      return !cashier || getCommissionOrderCashier(order) === cashier;
+    });
+  }
+  async function updateCommissionPaidFlag(order, payoutId){
+    const update = { commissionPaid:true, commissionPayoutId:payoutId, commissionPaidAt:(getMode()==="firebase" && firebaseReady ? serverTimestamp() : new Date().toISOString()) };
+    const id = String(order.docId || order.firestoreId || order.id || "");
+    if(getMode()==="firebase" && firebaseReady && id){
+      try { await updateDoc(doc(db, "order_history", id), update); return; } catch(error) {}
+      try { await updateDoc(doc(db, "orders", id), update); return; } catch(error) {}
+    }
+    const hist = getLocalHistory();
+    let idx = hist.findIndex(o => String(o.id || o.docId || o.firestoreId) === id);
+    if(idx >= 0){ hist[idx] = { ...hist[idx], ...update, commissionPaidAt:new Date().toISOString() }; setLocalHistory(hist); return; }
+    const ord = getLocalOrders();
+    idx = ord.findIndex(o => String(o.id || o.docId || o.firestoreId) === id);
+    if(idx >= 0){ ord[idx] = { ...ord[idx], ...update, commissionPaidAt:new Date().toISOString() }; setLocalOrders(ord); }
+  }
+  async function markCommissionPaid(cashier=null){
+    const month = $("reportMonth")?.value || currentMonthValue();
+    const status = $("reportStatusFilter")?.value || "all";
+    const report = buildCommissionReport(month, status);
+    const rows = cashier ? report.rows.filter(r => r.cashier === cashier) : report.rows;
+    if(!rows.length){ showNotice("No unpaid commission to mark paid"); return; }
+    const total = rows.reduce((sum,r)=>sum+Number(r.commission||0),0);
+    const label = cashier || "ALL STAFF";
+    if(!confirm(`Mark ${label} commission as PAID for ${month}?\nTotal: ${money(total)}\n\nThis will remove these sales from unpaid commission but keep payout history.`)) return;
+    const payoutPayload = {
+      month,
+      staff: rows.map(r => ({ cashier:r.cashier, salesCount:r.salesCount, singleUnits:r.singleUnits, bundleUnits:r.bundleUnits, commissionUnits:r.commissionUnits, commission:r.commission })),
+      totalCommission: total,
+      singleRate: report.singleRate,
+      bundleRate: report.bundleRate,
+      paidBy: auth?.currentUser?.email || "admin",
+      paidAt:(getMode()==="firebase" && firebaseReady ? serverTimestamp() : new Date().toISOString())
+    };
+    let payoutId = "PAYOUT-" + Date.now();
+    if(getMode()==="firebase" && firebaseReady){
+      const ref = await addDoc(collection(db, "commission_payouts"), payoutPayload);
+      payoutId = ref.id;
+    }else{
+      const payouts = commissionLocalPayouts();
+      payouts.unshift({ id:payoutId, ...payoutPayload, paidAt:new Date().toISOString() });
+      setCommissionLocalPayouts(payouts);
+    }
+    const staffSet = new Set(rows.map(r => r.cashier));
+    const orders = commissionOrdersForStaff(month, status, cashier || null).filter(o => staffSet.has(getCommissionOrderCashier(o)));
+    for(const order of orders){ await updateCommissionPaidFlag(order, payoutId); }
+    showNotice("Commission marked as paid");
+    renderCommissionReport();
+  }
+  async function renderCommissionPayoutHistory(){
+    const tbody = $("commissionPayoutHistory");
+    if(!tbody) return;
+    let payouts = [];
+    if(getMode()==="firebase" && firebaseReady){
+      try { payouts = await fetchFirebaseDocs("commission_payouts", "paidAt"); } catch(error) { payouts = []; }
+    }else payouts = commissionLocalPayouts();
+    if(!payouts.length){ tbody.innerHTML = '<tr><td colspan="5" class="empty">No payouts yet.</td></tr>'; return; }
+    tbody.innerHTML = payouts.slice(0,20).map(p => {
+      const staffText = (p.staff || []).map(s => `${escapeHtml(s.cashier)} (${money(s.commission || 0)})`).join("<br>");
+      const date = toDateSafe(p.paidAt); 
+      return `<tr><td>${date ? date.toLocaleString() : "-"}</td><td>${escapeHtml(p.month || "-")}</td><td>${staffText || "-"}</td><td><strong>${money(p.totalCommission || 0)}</strong></td><td>${escapeHtml(p.paidBy || "-")}</td></tr>`;
+    }).join("");
   }
   function exportCommissionCSV(){
     const month = $("reportMonth")?.value || currentMonthValue();
@@ -2686,6 +2768,7 @@ function initAdmin(){
     if($("exportReportBtn")) $("exportReportBtn").onclick = exportMonthlyReportCSV;
     if($("generateCommissionBtn")) $("generateCommissionBtn").onclick = renderCommissionReport;
     if($("exportCommissionBtn")) $("exportCommissionBtn").onclick = exportCommissionCSV;
+    if($("markAllCommissionPaidBtn")) $("markAllCommissionPaidBtn").onclick = () => markCommissionPaid(null);
     if($("commissionSingleRate")) $("commissionSingleRate").onchange = renderCommissionReport;
     if($("commissionBundleRate")) $("commissionBundleRate").onchange = renderCommissionReport;
     if($("archiveResetSalesBtn")) $("archiveResetSalesBtn").onclick = () => resetSalesData({ archive:true });
@@ -3021,7 +3104,7 @@ function initAdmin(){
     if((document.body.dataset.role === "staff" || page === "staff") && btn.dataset.tab !== "pos") return;
     switchTab(btn.dataset.tab);
     if(btn.dataset.tab === "promos"){ fillPromoProductSelects(); loadAdminPromos(); }
-    if(btn.dataset.tab === "reports"){ renderMonthlyReport(); }
+    if(btn.dataset.tab === "reports"){ renderMonthlyReport(); renderCommissionPayoutHistory(); }
   });
   async function handlePromoFormSave(e){
     if(e) e.preventDefault();
