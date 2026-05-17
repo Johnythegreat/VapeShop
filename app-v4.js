@@ -22,6 +22,27 @@ function productDocId(product){
 
 // GLOBAL promo matcher used by both customer page and admin page.
 // This fixes admin errors like: productMatchesPromoItem is not defined.
+
+// Top-level image helper for Admin POS / Staff POS.
+// firstProductImage is inside the customer shop scope, so POS code must use this safe global helper.
+function safeProductOnlyImages(p){
+  const imgs = Array.isArray(p?.images) ? p.images.map(x => String(x || "").trim()).filter(Boolean) : [];
+  const variantImgs = [];
+  if(p?.variantImages && typeof p.variantImages === "object"){
+    Object.values(p.variantImages).forEach(img => { if(img) variantImgs.push(String(img).trim()); });
+  }
+  if(Array.isArray(p?.variantPhotoList)){
+    p.variantPhotoList.forEach(v => { if(v?.image) variantImgs.push(String(v.image).trim()); });
+  }
+  const variantSet = new Set(variantImgs.filter(Boolean));
+  return imgs.filter(img => !variantSet.has(img));
+}
+function safeFirstProductImage(p){
+  const extraImgs = safeProductOnlyImages(p);
+  const imgs = Array.isArray(p?.images) ? p.images.map(x => String(x || "").trim()).filter(Boolean) : [];
+  return extraImgs[0] || String(p?.image || "").trim() || imgs[0] || "";
+}
+
 function productMatchesPromoItem(product, item){
   const wantedId = String(item?.productId || item?.docId || "").trim();
   const productIds = [product?.docId, product?.firestoreId, product?._docId, product?.id, product?.sku, product?.barcode]
@@ -979,7 +1000,28 @@ function initShop(){
     return String(product?.docId || product?.firestoreId || product?._docId || product?.id || "");
   }
 
-  function productMatchesPromoItem(product, item){
+  
+// Top-level image helper for Admin POS / Staff POS.
+// firstProductImage is inside the customer shop scope, so POS code must use this safe global helper.
+function safeProductOnlyImages(p){
+  const imgs = Array.isArray(p?.images) ? p.images.map(x => String(x || "").trim()).filter(Boolean) : [];
+  const variantImgs = [];
+  if(p?.variantImages && typeof p.variantImages === "object"){
+    Object.values(p.variantImages).forEach(img => { if(img) variantImgs.push(String(img).trim()); });
+  }
+  if(Array.isArray(p?.variantPhotoList)){
+    p.variantPhotoList.forEach(v => { if(v?.image) variantImgs.push(String(v.image).trim()); });
+  }
+  const variantSet = new Set(variantImgs.filter(Boolean));
+  return imgs.filter(img => !variantSet.has(img));
+}
+function safeFirstProductImage(p){
+  const extraImgs = safeProductOnlyImages(p);
+  const imgs = Array.isArray(p?.images) ? p.images.map(x => String(x || "").trim()).filter(Boolean) : [];
+  return extraImgs[0] || String(p?.image || "").trim() || imgs[0] || "";
+}
+
+function productMatchesPromoItem(product, item){
     const wantedId = String(item?.productId || item?.docId || "").trim();
     const productIds = [product?.docId, product?.firestoreId, product?._docId, product?.id, product?.sku, product?.barcode].map(v => String(v || "").trim()).filter(Boolean);
 
@@ -1053,7 +1095,7 @@ function initShop(){
           if(getVariantStock(row.product, row.size) < required){ showNotice("Selected promo item is out of stock"); return; }
         }
         const item = {
-          type:"bundle", bundleId:promo.id, id:promo.id, name:promo.name, brand:"MR VAPE SHOP", category:"Promo", price:Number(promo.price || 0), image:firstProductImage(selected[0].product), qty:1,
+          type:"bundle", bundleId:promo.id, id:promo.id, name:promo.name, brand:"MR VAPE SHOP", category:"Promo", price:Number(promo.price || 0), image:safeFirstProductImage(selected[0].product), qty:1,
           size:selected.map(r => r.size).join(" + "),
           bundleItems:selected.map(r => ({ productId:productDocId(r.product), name:r.product.name, brand:r.product.brand, category:r.product.category, size:r.size, qty:Number(r.item.qty || 1), image:(r.product.variantImages && r.product.variantImages[r.size]) ? r.product.variantImages[r.size] : firstProductImage(r.product) }))
         };
@@ -2791,7 +2833,7 @@ function initAdmin(){
         category:"Promo",
         price:Number(promo.price || 0),
         cost:0,
-        image:firstProductImage(selected[0].product),
+        image:safeFirstProductImage(selected[0].product),
         qty:1,
         size:selected.map(r => r.size).join(" + "),
         barcode:"",
@@ -2807,7 +2849,7 @@ function initAdmin(){
           qty:Number(r.item.qty || 1),
           cost:Number(r.product.costPrice || r.product.cost || 0),
           barcode:getVariantBarcode(r.product, r.size) || r.product.barcode || "",
-          image:(r.product.variantImages && r.product.variantImages[r.size]) || firstProductImage(r.product)
+          image:(r.product.variantImages && r.product.variantImages[r.size]) || safeFirstProductImage(r.product)
         }))
       };
       const existing = findExistingCartItem(posCart, item);
@@ -2844,7 +2886,7 @@ function initAdmin(){
     if(available < existingQty + qty){ showNotice("Not enough stock for " + variant); return false; }
     const existing = posCart.find(i => i.id === selectedPosProduct.id && i.size === variant);
     if(existing) existing.qty = Number(existing.qty) + qty;
-    else posCart.push({ id:selectedPosProduct.id, productId:selectedPosProduct.id, productDocId:selectedPosProduct.docId || selectedPosProduct.firestoreId || selectedPosProduct.id, name:selectedPosProduct.name, price:Number(selectedPosProduct.price || 0), cost:Number(selectedPosProduct.costPrice || selectedPosProduct.cost || 0), qty, size:variant, barcode:getVariantBarcode(selectedPosProduct, variant) || selectedPosProduct.barcode || "", image:(selectedPosProduct.variantImages && selectedPosProduct.variantImages[variant]) || firstProductImage(selectedPosProduct) });
+    else posCart.push({ id:selectedPosProduct.id, productId:selectedPosProduct.id, productDocId:selectedPosProduct.docId || selectedPosProduct.firestoreId || selectedPosProduct.id, name:selectedPosProduct.name, price:Number(selectedPosProduct.price || 0), cost:Number(selectedPosProduct.costPrice || selectedPosProduct.cost || 0), qty, size:variant, barcode:getVariantBarcode(selectedPosProduct, variant) || selectedPosProduct.barcode || "", image:(selectedPosProduct.variantImages && selectedPosProduct.variantImages[variant]) || safeFirstProductImage(selectedPosProduct) });
     if($("posQty")) $("posQty").value = 1;
     renderPosCart();
     if(!silent) showNotice("Added to POS cart");
