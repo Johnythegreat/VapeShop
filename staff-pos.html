@@ -248,11 +248,18 @@
       <div id="tab-reports" class="admin-tab-panel hidden">
         <section class="panel">
           <div class="panel-head">
-            <h2>Monthly Sales Report</h2>
-            <p>Track how many items sold, total revenue, total cost, and profit. Add Cost Price / Capital in each product to get accurate profit.</p>
+            <h2>Sales Report</h2>
+            <p>Generate a daily or monthly sales report. Track items sold, revenue, cost, and profit.</p>
           </div>
           <div class="admin-form">
             <div class="form-grid">
+              <label>Report Type
+                <select id="reportType">
+                  <option value="daily">Daily Report</option>
+                  <option value="monthly">Monthly Report</option>
+                </select>
+              </label>
+              <label>Report Date<input id="reportDate" type="date" /></label>
               <label>Report Month<input id="reportMonth" type="month" /></label>
               <label>Status Filter
                 <select id="reportStatusFilter">
@@ -335,7 +342,7 @@
           <div class="table-wrap">
             <table class="admin-table">
               <thead>
-                <tr><th>Receipt / Order ID</th><th>Customer</th><th>Total</th><th>Final Status</th><th>Items</th><th>Action</th></tr>
+                <tr><th>Receipt / Order ID</th><th>Date</th><th>Customer</th><th>Total</th><th>Final Status</th><th>Items</th><th>Action</th></tr>
               </thead>
               <tbody id="historyTable"></tbody>
             </table>

@@ -2282,9 +2282,9 @@ function initAdmin(){
       tbody.querySelectorAll("[data-cancel-restore]").forEach(btn => btn.onclick = async () => { try { await cancelAndRestoreOrder(btn.dataset.cancelRestore, activeOrdersCache); showNotice("Order cancelled and stock restored"); } catch(error) { showNotice(error.message || "Cancel failed"); } });
       tbody.querySelectorAll("[data-archive-order]").forEach(btn => btn.onclick = async () => { try { await moveOrderToHistory(btn.dataset.archiveOrder, activeOrdersCache); showNotice("Order moved to history"); } catch { showNotice("Move failed"); } });
     }
-    if(!historyOrders.length) historyBody.innerHTML = '<tr><td colspan="6" class="empty">No order history yet.</td></tr>';
+    if(!historyOrders.length) historyBody.innerHTML = '<tr><td colspan="7" class="empty">No order history yet.</td></tr>';
     else {
-      historyBody.innerHTML = historyOrders.map(order => { const isVoided = String(order.status || "").toLowerCase().includes("void") || order.voided; return `<tr><td><div style="font-weight:800">${escapeHtml(order.receiptNo || order.id || "-")}</div><div class="small">${escapeHtml(order.id||"")}</div>${isVoided ? `<div class="small" style="color:#ff9aa8;font-weight:900">VOIDED${order.voidReason ? ": "+escapeHtml(order.voidReason) : ""}</div>` : ""}</td><td><div style="font-weight:800">${escapeHtml(order.customer?.name||"-")}</div><div class="small">${escapeHtml(order.customer?.phone||"")}</div></td><td>${money(order.total||0)}</td><td>${escapeHtml(order.status||"Completed")}</td><td>${(order.items||[]).map(i => `${escapeHtml(i.name)} x${Number(i.qty)}<br><span class="small">${escapeHtml(i.size || "")}</span>`).join("<br>")}</td><td><div class="row-actions"><button class="btn ghost" data-history-print="${escapeHtml(order.id||"")}">Reprint</button>${isVoided ? "" : `<button class="btn danger" data-void-sale="${escapeHtml(order.id||"")}">Void Sale</button>`}</div></td></tr>`; }).join("");
+      historyBody.innerHTML = historyOrders.map(order => { const isVoided = String(order.status || "").toLowerCase().includes("void") || order.voided; return `<tr><td><div style="font-weight:800">${escapeHtml(order.receiptNo || order.id || "-")}</div><div class="small">${escapeHtml(order.id||"")}</div>${isVoided ? `<div class="small" style="color:#ff9aa8;font-weight:900">VOIDED${order.voidReason ? ": "+escapeHtml(order.voidReason) : ""}</div>` : ""}</td><td><div style="font-weight:800">${escapeHtml(orderDateDisplay(order))}</div></td><td><div style="font-weight:800">${escapeHtml(order.customer?.name||"-")}</div><div class="small">${escapeHtml(order.customer?.phone||"")}</div></td><td>${money(order.total||0)}</td><td>${escapeHtml(order.status||"Completed")}</td><td>${(order.items||[]).map(i => `${escapeHtml(i.name)} x${Number(i.qty)}<br><span class="small">${escapeHtml(i.size || "")}</span>`).join("<br>")}</td><td><div class="row-actions"><button class="btn ghost" data-history-print="${escapeHtml(order.id||"")}">Reprint</button>${isVoided ? "" : `<button class="btn danger" data-void-sale="${escapeHtml(order.id||"")}">Void Sale</button>`}</div></td></tr>`; }).join("");
       historyBody.querySelectorAll("[data-history-print]").forEach(btn => btn.onclick = () => printReceipt(allOrdersForPrint.find(x => x.id === btn.dataset.historyPrint)));
       historyBody.querySelectorAll("[data-void-sale]").forEach(btn => btn.onclick = async () => { try { await voidHistorySale(btn.dataset.voidSale); showNotice("Sale voided, stock restored, reports updated"); } catch(error) { console.error(error); showNotice(error.message || "Void sale failed"); } });
     }
@@ -2336,6 +2336,19 @@ function initAdmin(){
     const d = new Date();
     return d.getFullYear() + "-" + String(d.getMonth()+1).padStart(2,"0");
   }
+  function currentDateValue(){
+    const d = new Date();
+    return d.getFullYear() + "-" + String(d.getMonth()+1).padStart(2,"0") + "-" + String(d.getDate()).padStart(2,"0");
+  }
+  function dateInputValue(value){
+    const d = toDateSafe(value);
+    if(!d) return "";
+    return d.getFullYear() + "-" + String(d.getMonth()+1).padStart(2,"0") + "-" + String(d.getDate()).padStart(2,"0");
+  }
+  function orderDateDisplay(order){
+    const d = reportOrderDate(order);
+    return d ? d.toLocaleString() : "—";
+  }
   function productByAnyId(id){
     const target = String(id || "");
     return adminProductsCache.find(p => [p.id,p.docId,p.firestoreId,p._docId,p.sku,p.barcode].map(x=>String(x||"")).includes(target));
@@ -2358,13 +2371,26 @@ function initAdmin(){
   function buildMonthlyReport(monthValue, statusFilter){
     const [yearStr, monthStr] = String(monthValue || currentMonthValue()).split("-");
     const year = Number(yearStr), month = Number(monthStr) - 1;
+    return buildSalesReportByDate((d) => d && d.getFullYear() === year && d.getMonth() === month, statusFilter, String(monthValue || currentMonthValue()), "monthly");
+  }
+  function buildDailyReport(dateValue, statusFilter){
+    const target = String(dateValue || currentDateValue());
+    return buildSalesReportByDate((d) => dateInputValue(d) === target, statusFilter, target, "daily");
+  }
+  function buildSelectedReport(){
+    const type = $("reportType")?.value || "daily";
+    return type === "monthly"
+      ? buildMonthlyReport($("reportMonth")?.value || currentMonthValue(), $("reportStatusFilter")?.value || "all")
+      : buildDailyReport($("reportDate")?.value || currentDateValue(), $("reportStatusFilter")?.value || "all");
+  }
+  function buildSalesReportByDate(matchDate, statusFilter, label, reportType){
     const allOrders = [...(activeOrdersCache || []), ...(historyOrdersCache || [])];
     const rowsMap = new Map();
     let revenue = 0, cost = 0, itemsSold = 0, ordersCount = 0;
 
     allOrders.forEach(order => {
       const d = reportOrderDate(order);
-      if(!d || d.getFullYear() !== year || d.getMonth() !== month) return;
+      if(!matchDate(d)) return;
       if(!orderAllowedByReportStatus(order, statusFilter)) return;
       ordersCount += 1;
       const orderItems = Array.isArray(order.items) ? order.items : [];
@@ -2407,7 +2433,7 @@ function initAdmin(){
 
     const rows = Array.from(rowsMap.values()).map(r => ({ ...r, profit:Number(r.revenue || 0) - Number(r.cost || 0) })).sort((a,b)=>b.qty-a.qty);
     // Bundle rows do not have allocated revenue per component. Keep total revenue/profit accurate at summary level.
-    return { monthValue:String(monthValue || currentMonthValue()), ordersCount, itemsSold, revenue, cost, profit:revenue - cost, rows };
+    return { monthValue:String(label || currentMonthValue()), reportType:reportType || "monthly", ordersCount, itemsSold, revenue, cost, profit:revenue - cost, rows };
   }
 
   function resizeCanvasForChart(canvas){
@@ -2560,7 +2586,7 @@ function initAdmin(){
 
     allOrders.forEach(order => {
       const d = reportOrderDate(order);
-      if(!d || d.getFullYear() !== year || d.getMonth() !== month) return;
+      if(!matchDate(d)) return;
       if(!orderAllowedByReportStatus(order, statusFilter)) return;
       if(commissionIsPaid(order)) return;
       const cashier = getCommissionOrderCashier(order);
@@ -2711,16 +2737,17 @@ function initAdmin(){
 
   function renderMonthlyReport(){
     const monthEl = $("reportMonth");
-    const filterEl = $("reportStatusFilter");
+    const dateEl = $("reportDate");
     if(monthEl && !monthEl.value) monthEl.value = currentMonthValue();
-    const report = buildMonthlyReport(monthEl?.value || currentMonthValue(), filterEl?.value || "all");
+    if(dateEl && !dateEl.value) dateEl.value = currentDateValue();
+    const report = buildSelectedReport();
     lastReportRows = report.rows;
     if($("reportItemsSold")) $("reportItemsSold").textContent = String(report.itemsSold);
     if($("reportRevenue")) $("reportRevenue").textContent = money(report.revenue);
     if($("reportCost")) $("reportCost").textContent = money(report.cost);
     if($("reportProfit")) $("reportProfit").textContent = money(report.profit);
     renderSalesCharts(report);
-    if($("reportSubtitle")) $("reportSubtitle").textContent = `${report.ordersCount} order(s) found for ${report.monthValue}. Profit uses product Cost Price / Capital.`;
+    if($("reportSubtitle")) $("reportSubtitle").textContent = `${report.ordersCount} order(s) found for ${report.reportType === "daily" ? "date" : "month"} ${report.monthValue}. Profit uses product Cost Price / Capital.`;
     const tbody = $("reportItemsTable");
     if(!tbody) return;
     if(!report.rows.length){ tbody.innerHTML = '<tr><td colspan="6" class="empty">No sales found for this month.</td></tr>'; renderCommissionReport(); return; }
@@ -2728,8 +2755,8 @@ function initAdmin(){
     renderCommissionReport();
   }
   function exportMonthlyReportCSV(){
-    const month = $("reportMonth")?.value || currentMonthValue();
-    const report = buildMonthlyReport(month, $("reportStatusFilter")?.value || "all");
+    const report = buildSelectedReport();
+    const month = report.monthValue;
     const lines = [
       ["Month", month],
       ["Items Sold", report.itemsSold],
@@ -2744,7 +2771,7 @@ function initAdmin(){
     const blob = new Blob([csv], {type:"text/csv;charset=utf-8"});
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
-    a.href = url; a.download = `mr-vape-sales-report-${month}.csv`; a.click();
+    a.href = url; a.download = `mr-vape-${report.reportType || "sales"}-report-${month}.csv`; a.click();
     URL.revokeObjectURL(url);
   }
 
@@ -2795,6 +2822,7 @@ function initAdmin(){
   }
   function setupReportsAdmin(){
     if($("reportMonth") && !$("reportMonth").value) $("reportMonth").value = currentMonthValue();
+    if($("reportDate") && !$("reportDate").value) $("reportDate").value = currentDateValue();
     if($("generateReportBtn")) $("generateReportBtn").onclick = renderMonthlyReport;
     if($("exportReportBtn")) $("exportReportBtn").onclick = exportMonthlyReportCSV;
     if($("generateCommissionBtn")) $("generateCommissionBtn").onclick = renderCommissionReport;
@@ -2805,6 +2833,9 @@ function initAdmin(){
     if($("archiveResetSalesBtn")) $("archiveResetSalesBtn").onclick = () => resetSalesData({ archive:true });
     if($("hardResetSalesBtn")) $("hardResetSalesBtn").onclick = () => resetSalesData({ archive:false });
     if($("reportStatusFilter")) $("reportStatusFilter").onchange = renderMonthlyReport;
+    if($("reportType")) $("reportType").onchange = renderMonthlyReport;
+    if($("reportDate")) $("reportDate").onchange = renderMonthlyReport;
+    if($("reportMonth")) $("reportMonth").onchange = renderMonthlyReport;
   }
 
   async function setupShippingAdmin(){
