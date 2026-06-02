@@ -3386,9 +3386,9 @@ document.addEventListener("keydown", (event) => {
 /* === Unlimited Product Image Builder Upgrade === */
 (function(){
   function $(id){ return document.getElementById(id); }
-  function getImageInputs(){ return Array.from(document.querySelectorAll('#imageRows .image-row input')); }
+  function getImageInputs(){ return Array.from(document.querySelectorAll('#imageRows .image-row input[type="text"]')); }
   function syncProductImages(){
-    const urls = getImageInputs().map(input => (input.value || '').trim()).filter(Boolean);
+    const urls = getImageInputs().map(input => (input.value || '').trim()).filter(url => url && url !== 'Uploading image...' && /^(https?:\/\/|data:image\/)/i.test(url));
     const main = $('image');
     if(main) main.value = urls[0] || '';
     return urls;
@@ -3404,6 +3404,8 @@ document.addEventListener("keydown", (event) => {
     const file = row.querySelector('input[type="file"]');
     input.value = value || '';
     input.addEventListener('input', syncProductImages);
+    input.addEventListener('change', syncProductImages);
+    input.addEventListener('paste', function(){ setTimeout(syncProductImages, 0); });
     if(file){
       file.addEventListener('change', async function(){
         const picked = file.files && file.files[0];
