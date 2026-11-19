@@ -24,11 +24,19 @@ service cloud.firestore {
       allow create, update, delete: if isAdmin();
     }
 
+    function isValidCustomerStockDeduction() {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly(["stock", "variantStocks", "updatedAt"])
+        && request.resource.data.stock is number
+        && request.resource.data.stock >= 0
+        && request.resource.data.stock <= resource.data.stock;
+    }
+
     match /products/{id} {
       allow read: if true;
       allow create, delete: if isAdmin();
       allow update: if isAdmin()
-        || (isStaff() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["stock", "variantStocks", "updatedAt"]));
+        || (isStaff() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["stock", "variantStocks", "updatedAt"]))
+        || isValidCustomerStockDeduction();
     }
 
     match /promos/{id} {
@@ -37,13 +45,14 @@ service cloud.firestore {
     }
 
     match /orders/{id} {
-      allow create: if true;                 // customer checkout
-      allow read, update, delete: if isAdmin() || isStaff();
+      allow create, read: if true;           // customer checkout & order tracking
+      allow update, delete: if isAdmin() || isStaff();
     }
 
     match /order_history/{id} {
+      allow read: if true;                   // customer order tracking
       allow create: if isAdmin() || isStaff(); // POS completed sale
-      allow read, update, delete: if isAdmin() || isStaff();
+      allow update, delete: if isAdmin() || isStaff();
     }
 
     match /customers_public/{id} {

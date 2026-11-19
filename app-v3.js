@@ -132,7 +132,7 @@ const demoProducts = [
 ];
 const $ = (id) => document.getElementById(id);
 const readJSON = (k, f) => { try { const r = localStorage.getItem(k); return r ? JSON.parse(r) : f; } catch { return f; } };
-const writeJSON = (k, v) => localStorage.setItem(k, JSON.stringify(v));
+const writeJSON = (k, v) => { localStorage.setItem(k, JSON.stringify(v)); try { window.dispatchEvent(new CustomEvent("vape-local-storage-change", { detail: { key: k } })); } catch {} };
 const money = (v) => "₱" + Number(v || 0).toLocaleString();
 const cartSubtotal = (items) => items.reduce((s, i) => s + Number(i.price) * Number(i.qty), 0);
 const totalAmount = (items, shippingFee = 0) => cartSubtotal(items) + Number(shippingFee || 0);
@@ -158,11 +158,26 @@ async function saveShippingSettings(settings){
   return clean;
 }
 const variantStockMap = (p) => (p && p.variantStocks && typeof p.variantStocks === "object") ? p.variantStocks : {};
+const hasVariantStockMap = (obj) => !!(obj && typeof obj === "object" && Object.keys(obj).length > 0);
+function findVariantKey(map, variant){
+  if(!hasVariantStockMap(map) || !variant) return null;
+  if(Object.prototype.hasOwnProperty.call(map, variant)) return variant;
+  const needle = String(variant).trim().toLowerCase();
+  if(!needle) return null;
+  return Object.keys(map).find(k => String(k).trim().toLowerCase() === needle) || null;
+}
 const getVariantStock = (p, variant) => {
   const map = variantStockMap(p);
-  if(variant && Object.prototype.hasOwnProperty.call(map, variant)) return Number(map[variant] || 0);
+  const key = findVariantKey(map, variant);
+  if(key !== null) return Number(map[key] || 0);
   return Number(p?.stock || 0);
 };
+function resolveLocalProductByComponent(component, list){
+  const keys = [component?.productDocId, component?.docId, component?.firestoreId, component?.productId, component?.id, component?.sku, component?.barcode]
+    .map(v => String(v || "").trim()).filter(Boolean);
+  if(!keys.length) return null;
+  return (list || []).find(p => [p?.docId, p?.firestoreId, p?._docId, p?.id, p?.sku, p?.barcode].map(v => String(v || "").trim()).some(v => keys.includes(v))) || null;
+}
 const variantBarcodeMap = (p) => (p && p.variantBarcodes && typeof p.variantBarcodes === "object") ? p.variantBarcodes : {};
 const getVariantBarcode = (p, variant) => String(variantBarcodeMap(p)[variant] || "").trim();
 function findProductByVariantBarcode(list, barcode){
@@ -196,12 +211,19 @@ const forEachStockComponent = (item, callback) => {
   if(isBundleCartItem(item)){
     item.bundleItems.forEach(component => callback({
       productId: component.productId || component.id,
+      productDocId: component.productDocId || component.docId || component.firestoreId || component.productId || component.id,
       size: component.size || component.variant || "Default",
       qty: Number(item.qty || 1) * Number(component.qty || 1),
       label: component.name || item.name || "Bundle item"
     }));
   } else {
-    callback({ productId:item.id || item.productId, size:item.size || item.variant || "Default", qty:Number(item.qty || 1), label:item.name || "Product" });
+    callback({
+      productId: item.productId || item.id,
+      productDocId: item.productDocId || item.docId || item.firestoreId || item.productId || item.id,
+      size: item.size || item.variant || "Default",
+      qty: Number(item.qty || 1),
+      label: item.name || "Product"
+    });
   }
 };
 const getProductVariants = (p, fallback=[]) => Array.isArray(p?.variants) && p.variants.length ? p.variants.filter(Boolean) : fallback;
@@ -494,7 +516,7 @@ async function deletePromoItem(promoId){
   }
   setLocalPromos(getLocalPromos().filter(x => x.id !== promoId));
 }
-function storageSync(callback){ const h = () => callback(); window.addEventListener("storage", h); return () => window.removeEventListener("storage", h); }
+function storageSync(callback){ const h = () => callback(); window.addEventListener("storage", h); window.addEventListener("vape-local-storage-change", h); return () => { window.removeEventListener("storage", h); window.removeEventListener("vape-local-storage-change", h); }; }
 async function saveProduct(payload, docId){
   if(getMode()==="firebase" && firebaseReady){
     if(docId){ await updateDoc(doc(db, "products", docId), payload); return docId; }
@@ -526,13 +548,15 @@ async function saveCustomerProfile(account){
 }
 async function createOrder(cart, account, shippingInfo={}){
   if(getMode()==="firebase" && firebaseReady){
+    let createdOrderId = "";
     await runTransaction(db, async (transaction) => {
       // Firestore transactions require all reads before writes.
       const componentRows = [];
       for(const item of cart){
         forEachStockComponent(item, component => {
-          if(!component.productId) throw new Error("Missing bundle product ID");
-          componentRows.push({ item, component, ref:doc(db, "products", component.productId) });
+          const targetDocId = component.productDocId || component.productId;
+          if(!targetDocId) throw new Error("Missing product ID for " + (component.label || "item"));
+          componentRows.push({ item, component, ref:doc(db, "products", targetDocId) });
         });
       }
 
@@ -552,13 +576,22 @@ async function createOrder(cart, account, shippingInfo={}){
         const key = ref.path;
         let state = updateMap.get(key);
         if(!state){
-          state = { ref, data, variantStocks:(data.variantStocks && typeof data.variantStocks === "object") ? { ...data.variantStocks } : null, stock:Number(data.stock || 0) };
+          state = {
+            ref,
+            data,
+            variantStocks: hasVariantStockMap(data.variantStocks) ? { ...data.variantStocks } : null,
+            variantUpdated: false,
+            stock: Number(data.stock || 0)
+          };
           updateMap.set(key, state);
         }
-        if(state.variantStocks && Object.prototype.hasOwnProperty.call(state.variantStocks, selectedVariant)){
-          const vStock = Number(state.variantStocks[selectedVariant] || 0);
-          if(vStock < qty) throw new Error("Not enough stock for " + (item.name || component.label) + " - " + selectedVariant);
-          state.variantStocks[selectedVariant] = vStock - qty;
+        const matchedVariant = findVariantKey(state.variantStocks, selectedVariant);
+        if(matchedVariant !== null){
+          const vStock = Number(state.variantStocks[matchedVariant] || 0);
+          if(vStock < qty) throw new Error("Not enough stock for " + (item.name || component.label) + " - " + matchedVariant);
+          state.variantStocks[matchedVariant] = vStock - qty;
+          state.variantUpdated = true;
+          state.stock = sumVariantStocks(state.variantStocks);
         } else {
           if(state.stock < qty) throw new Error("Not enough stock for " + (item.name || component.label));
           state.stock -= qty;
@@ -566,49 +599,62 @@ async function createOrder(cart, account, shippingInfo={}){
       }
 
       updateMap.forEach(state => {
-        if(state.variantStocks) transaction.update(state.ref, { variantStocks:state.variantStocks, stock:sumVariantStocks(state.variantStocks) });
-        else transaction.update(state.ref, { stock:state.stock });
+        if(state.variantUpdated && state.variantStocks){
+          transaction.update(state.ref, { variantStocks:state.variantStocks, stock:sumVariantStocks(state.variantStocks), updatedAt:serverTimestamp() });
+        } else {
+          transaction.update(state.ref, { stock:state.stock, updatedAt:serverTimestamp() });
+        }
       });
 
       const liveItems = cart.map(item => {
         if(isBundleCartItem(item)) return {
           type:"bundle", bundleId:item.bundleId || item.id || "v2-v3-bundle", name:item.name, qty:Number(item.qty || 1), price:Number(item.price || 0), image:item.image || "",
-          bundleItems:(item.bundleItems || []).map(c => ({ productId:c.productId || c.id, name:c.name, brand:c.brand || "", category:c.category || "", size:c.size || c.variant || "Default", qty:Number(c.qty || 1), image:c.image || "" })),
+          bundleItems:(item.bundleItems || []).map(c => ({ productId:c.productId || c.id, productDocId:c.productDocId || c.docId || c.firestoreId || c.productId || c.id, name:c.name, brand:c.brand || "", category:c.category || "", size:c.size || c.variant || "Default", qty:Number(c.qty || 1), image:c.image || "" })),
           size:(item.bundleItems || []).map(c => c.size || c.variant || "Default").join(" + ")
         };
-        return { name:item.name, qty:Number(item.qty || 1), price:Number(item.price), productId:item.id, size:item.size || item.variant || "Default", image:item.image || "" };
+        return { name:item.name, qty:Number(item.qty || 1), price:Number(item.price), productId:item.productId || item.id, productDocId:item.productDocId || item.docId || item.firestoreId || item.productId || item.id, size:item.size || item.variant || "Default", image:item.image || "" };
       });
 
       const orderRef = doc(collection(db, "orders"));
+      createdOrderId = orderRef.id;
       transaction.set(orderRef, { customer:account, items:liveItems, subtotal:cartSubtotal(liveItems), shippingFee:Number(shippingInfo.fee || 0), shippingZone:shippingInfo.zone || "", total:totalAmount(liveItems, shippingInfo.fee), status:"Pending", createdAt:serverTimestamp() });
     });
-    return;
+    return createdOrderId;
   }
 
-  const products = getLocalProducts();
+  const products = getLocalProducts().map(p => ({ ...p, variantStocks: hasVariantStockMap(p.variantStocks) ? { ...p.variantStocks } : (p.variantStocks || {}) }));
   for(const item of cart){
     forEachStockComponent(item, component => {
-      const p = products.find(x => x.id === component.productId);
-      if(!p || getVariantStock(p, component.size) < Number(component.qty)) throw new Error("Not enough stock for " + (item.name || component.label) + (component.size ? " - " + component.size : ""));
-    });
-  }
-  for(const item of cart){
-    forEachStockComponent(item, component => {
-      const p = products.find(x => x.id === component.productId);
-      const map = variantStockMap(p);
-      if(component.size && Object.prototype.hasOwnProperty.call(map, component.size)){
-        p.variantStocks = { ...map, [component.size]: Number(map[component.size] || 0) - Number(component.qty) };
+      const p = resolveLocalProductByComponent(component, products);
+      if(!p) throw new Error((item.name || component.label) + " not found");
+      const qty = Number(component.qty || 0);
+      const matchedVariant = findVariantKey(p.variantStocks, component.size);
+      if(matchedVariant !== null){
+        const current = Number(p.variantStocks[matchedVariant] || 0);
+        if(current < qty) throw new Error("Not enough stock for " + (item.name || component.label) + " - " + matchedVariant);
+        p.variantStocks[matchedVariant] = current - qty;
         p.stock = sumVariantStocks(p.variantStocks);
       } else {
-        p.stock = Number(p.stock) - Number(component.qty);
+        const current = Number(p.stock || 0);
+        if(current < qty) throw new Error("Not enough stock for " + (item.name || component.label) + (component.size ? " - " + component.size : ""));
+        p.stock = current - qty;
       }
     });
   }
   setLocalProducts(products);
-  const liveItems = cart.map(i => isBundleCartItem(i) ? ({ ...i, qty:Number(i.qty || 1), size:(i.bundleItems || []).map(c => c.size || c.variant || "Default").join(" + ") }) : ({ name:i.name, qty:Number(i.qty), price:Number(i.price), productId:i.id, size:i.size || "Default", image:i.image || "" }));
+  const liveItems = cart.map(i => isBundleCartItem(i) ? ({
+    ...i,
+    qty:Number(i.qty || 1),
+    bundleItems:(i.bundleItems || []).map(c => ({ ...c, productDocId:c.productDocId || c.docId || c.firestoreId || c.productId || c.id })),
+    size:(i.bundleItems || []).map(c => c.size || c.variant || "Default").join(" + ")
+  }) : ({
+    name:i.name, qty:Number(i.qty), price:Number(i.price), productId:i.productId || i.id, productDocId:i.productDocId || i.docId || i.firestoreId || i.productId || i.id, size:i.size || "Default", image:i.image || ""
+  }));
   const orders = getLocalOrders();
-  orders.unshift({ id:"ORD-" + Date.now(), customer:account, items:liveItems, subtotal:cartSubtotal(liveItems), shippingFee:Number(shippingInfo.fee || 0), shippingZone:shippingInfo.zone || "", total:totalAmount(liveItems, shippingInfo.fee), status:"Pending", createdAt:new Date().toISOString() });
+  const orderId = "ORD-" + Date.now();
+  orders.unshift({ id:orderId, customer:account, items:liveItems, subtotal:cartSubtotal(liveItems), shippingFee:Number(shippingInfo.fee || 0), shippingZone:shippingInfo.zone || "", total:totalAmount(liveItems, shippingInfo.fee), status:"Pending", createdAt:new Date().toISOString() });
   setLocalOrders(orders);
+  return orderId;
 }
 async function updateOrderStatus(orderId, newStatus, activeOrdersCache=[]){
   if(getMode()==="firebase" && firebaseReady){
@@ -637,25 +683,53 @@ async function cancelAndRestoreOrder(orderId, activeOrdersCache=[]){
       const reads = [];
       for(const item of (order.items || [])){
         forEachStockComponent(item, component => {
-          if(!component.productId) return;
-          const ref = doc(db, "products", component.productId);
+          const pid = component.productDocId || component.productId;
+          if(!pid) return;
+          const ref = doc(db, "products", pid);
           reads.push({ item, component, ref });
         });
       }
       for(const row of reads){ row.snap = await transaction.get(row.ref); }
-      const orderRef = doc(db, "orders", orderId);
-      const histRef = doc(db, "order_history", orderId);
+      const updateMap = new Map();
       for(const row of reads){
         if(!row.snap.exists()) continue;
         const data = row.snap.data();
         const qty = Number(row.component?.qty || row.item.qty || 0);
         const variant = row.component?.size || row.item.size || row.item.variant || "Default";
-        const variantStocks = (data.variantStocks && typeof data.variantStocks === "object") ? { ...data.variantStocks } : {};
-        if(variant && (Object.keys(variantStocks).length || Array.isArray(data.variants))){
-          variantStocks[variant] = Number(variantStocks[variant] || 0) + qty;
-          transaction.update(row.ref, { variantStocks, stock: sumVariantStocks(variantStocks) });
-        } else transaction.update(row.ref, { stock: Number(data.stock || 0) + qty });
+        const key = row.ref.path;
+        let state = updateMap.get(key);
+        if(!state){
+          state = {
+            ref: row.ref,
+            variantStocks: hasVariantStockMap(data.variantStocks) ? { ...data.variantStocks } : null,
+            variantUpdated: false,
+            hasVariants: Array.isArray(data.variants) && data.variants.length > 0,
+            stock: Number(data.stock || 0)
+          };
+          updateMap.set(key, state);
+        }
+        const matchedKey = findVariantKey(state.variantStocks, variant);
+        if(matchedKey !== null){
+          state.variantStocks[matchedKey] = Number(state.variantStocks[matchedKey] || 0) + qty;
+          state.variantUpdated = true;
+          state.stock = sumVariantStocks(state.variantStocks);
+        } else if(state.hasVariants && variant && variant !== "Default" && state.variantStocks){
+          state.variantStocks[variant] = Number(state.variantStocks[variant] || 0) + qty;
+          state.variantUpdated = true;
+          state.stock = sumVariantStocks(state.variantStocks);
+        } else {
+          state.stock += qty;
+        }
       }
+      updateMap.forEach(state => {
+        if(state.variantUpdated && state.variantStocks){
+          transaction.update(state.ref, { variantStocks:state.variantStocks, stock:sumVariantStocks(state.variantStocks), updatedAt:serverTimestamp() });
+        } else {
+          transaction.update(state.ref, { stock:state.stock, updatedAt:serverTimestamp() });
+        }
+      });
+      const orderRef = doc(db, "orders", orderId);
+      const histRef = doc(db, "order_history", orderId);
       transaction.set(histRef, { ...order, status:"Cancelled", cancelReason:"Cancelled by admin", stockRestored:true, movedAt:serverTimestamp() });
       transaction.delete(orderRef);
     });
@@ -664,13 +738,21 @@ async function cancelAndRestoreOrder(orderId, activeOrdersCache=[]){
   const products = getLocalProducts();
   (order.items || []).forEach(item => {
     forEachStockComponent(item, component => {
-      const p = products.find(x => x.id === component.productId);
+      const p = resolveLocalProductByComponent(component, products);
       if(!p) return;
       const qty = Number(component.qty || 0);
       const variant = component.size || "Default";
       const map = variantStockMap(p);
-      if(variant && (Object.keys(map).length || Array.isArray(p.variants))){ p.variantStocks = { ...map, [variant]: Number(map[variant] || 0) + qty }; p.stock = sumVariantStocks(p.variantStocks); }
-      else p.stock = Number(p.stock || 0) + qty;
+      const matchedKey = findVariantKey(map, variant);
+      if(matchedKey !== null){
+        p.variantStocks = { ...map, [matchedKey]: Number(map[matchedKey] || 0) + qty };
+        p.stock = sumVariantStocks(p.variantStocks);
+      } else if(hasVariantStockMap(map) && Array.isArray(p.variants) && p.variants.length > 0 && variant && variant !== "Default"){
+        p.variantStocks = { ...map, [variant]: Number(map[variant] || 0) + qty };
+        p.stock = sumVariantStocks(p.variantStocks);
+      } else {
+        p.stock = Number(p.stock || 0) + qty;
+      }
     });
   });
   setLocalProducts(products);
@@ -844,13 +926,7 @@ else if(page === "shop") initShop();
 else if(page === "admin") requireAdminGuard();
 else if(page === "staff") requireStaffGuard();
 
-document.addEventListener("DOMContentLoaded", () => {
-  const inboxBtn = document.getElementById("openInboxBtn");
-  const inquiryModal = document.getElementById("inquiryModal");
-  if(inboxBtn && inquiryModal){
-    inboxBtn.addEventListener("click", () => inquiryModal.classList.remove("hidden"));
-  }
-});
+// Inbox button is bound inside initShop()
 
 
 function initShop(){
@@ -1097,7 +1173,7 @@ function productMatchesPromoItem(product, item){
         const item = {
           type:"bundle", bundleId:promo.id, id:promo.id, name:promo.name, brand:"MR VAPE SHOP", category:"Promo", price:Number(promo.price || 0), image:safeFirstProductImage(selected[0].product), qty:1,
           size:selected.map(r => r.size).join(" + "),
-          bundleItems:selected.map(r => ({ productId:productDocId(r.product), name:r.product.name, brand:r.product.brand, category:r.product.category, size:r.size, qty:Number(r.item.qty || 1), image:(r.product.variantImages && r.product.variantImages[r.size]) ? r.product.variantImages[r.size] : firstProductImage(r.product) }))
+          bundleItems:selected.map(r => ({ productId:productDocId(r.product), productDocId:productDocId(r.product), name:r.product.name, brand:r.product.brand, category:r.product.category, size:r.size, qty:Number(r.item.qty || 1), image:(r.product.variantImages && r.product.variantImages[r.size]) ? r.product.variantImages[r.size] : firstProductImage(r.product) }))
         };
         const existing = findExistingCartItem(cart, item);
         const nextQty = (existing ? Number(existing.qty || 0) : 0) + 1;
@@ -1206,7 +1282,7 @@ function productMatchesPromoItem(product, item){
       return;
     }
     if(existing) existing.qty += 1;
-    else cart.push({ id:p.id, name:p.name, brand:p.brand, category:p.category, price:p.price, image:firstProductImage(p), qty:1, size:"Default" });
+    else cart.push({ id:p.id, productId:p.id, productDocId:productDocId(p), name:p.name, brand:p.brand, category:p.category, price:p.price, image:firstProductImage(p), qty:1, size:"Default" });
     writeJSON(CART_KEY, cart);
     renderCart();
     showNotice("Added to cart");
@@ -1286,8 +1362,8 @@ function productMatchesPromoItem(product, item){
       });
     }
 
-    const defaultVariants = p.category === "Devices" || p.category === "Battery" ? ["Black","Gold","Purple","Blue"] : ["Classic","Mint","Fruit","Ice"];
-    const variants = Array.isArray(p.variants) && p.variants.length ? p.variants : defaultVariants;
+    const hasDefinedVariants = Array.isArray(p.variants) && p.variants.filter(Boolean).length > 0;
+    const variants = hasDefinedVariants ? p.variants.filter(Boolean) : ["Default"];
     const variantDetail = document.getElementById("productDetailVariants");
     if(variantDetail) variantDetail.textContent = variants.join(", ");
     const sizeGrid = $("sizeGrid");
@@ -1302,6 +1378,10 @@ function productMatchesPromoItem(product, item){
     $("detailQtyValue").textContent = String(detailQty);
     updateDetailTotal();
     wireSizeButtons();
+    if(!hasDefinedVariants){
+      const defaultBtn = sizeGrid?.querySelector(".size-option:not([disabled])");
+      if(defaultBtn) defaultBtn.click();
+    }
 
     productPageModal.classList.remove("hidden");
     const productScroll = document.querySelector(".product-page-scroll");
@@ -1346,6 +1426,8 @@ function productMatchesPromoItem(product, item){
     if(existing) existing.qty += detailQty;
     else cart.push({
       id:selectedProduct.id,
+      productId:selectedProduct.id,
+      productDocId:productDocId(selectedProduct),
       name:selectedProduct.name,
       brand:selectedProduct.brand,
       category:selectedProduct.category,
@@ -1661,7 +1743,9 @@ function productMatchesPromoItem(product, item){
     }
   }
 
+  let isCheckingOut = false;
   async function checkout(){
+    if(isCheckingOut) return;
     if(!account.name || !account.phone){
       openDrawer("account");
       showNotice("Please fill your account details first");
@@ -1671,16 +1755,38 @@ function productMatchesPromoItem(product, item){
       showNotice("Your cart is empty");
       return;
     }
+    isCheckingOut = true;
+    const btn = $("checkoutBtn");
+    if(btn){ btn.disabled = true; btn.textContent = "Placing order..."; }
     try {
+      // Ensure every cart item has its live Firestore document ID even if loaded from an older saved cart.
+      const hydratedCart = cart.map(item => {
+        if(isBundleCartItem(item)){
+          return {
+            ...item,
+            bundleItems: (item.bundleItems || []).map(c => {
+              const live = resolveLocalProductByComponent(c, products);
+              return live ? { ...c, productDocId: productDocId(live) } : c;
+            })
+          };
+        }
+        const live = resolveLocalProductByComponent(item, products);
+        return live ? { ...item, productDocId: productDocId(live) } : item;
+      });
       await saveCustomerProfile(account);
-      await createOrder(cart, account, getSelectedShipping());
+      await createOrder(hydratedCart, account, getSelectedShipping());
       cart = [];
       writeJSON(CART_KEY, cart);
       renderCart();
       closeDrawer();
-      showNotice("Order placed");
+      showNotice("Order placed! Inventory updated.");
     } catch (error) {
+      console.error("Checkout failed:", error);
       showNotice(error.message || "Checkout failed");
+    } finally {
+      isCheckingOut = false;
+      const b = $("checkoutBtn");
+      if(b){ b.disabled = false; b.textContent = "Checkout"; }
     }
   }
 
@@ -1854,7 +1960,6 @@ function productMatchesPromoItem(product, item){
   $("openAccountBtn").onclick = () => openInquiry();
   if($("openInboxBtn")) {
     $("openInboxBtn").onclick = () => openInquiry();
-    $("openInboxBtn").addEventListener("click", () => openInquiry());
   }
   function setBottomNavActive(activeId){
     document.querySelectorAll(".bottom-nav .nav-btn").forEach(btn => btn.classList.toggle("active", btn.id === activeId));
@@ -2029,15 +2134,19 @@ async function createPosSale(cart, account={}, payment={}){
         if(!state){
           state = {
             ref,
-            variantStocks:(data.variantStocks && typeof data.variantStocks === "object") ? { ...data.variantStocks } : null,
-            stock:Number(data.stock || 0)
+            variantStocks: hasVariantStockMap(data.variantStocks) ? { ...data.variantStocks } : null,
+            variantUpdated: false,
+            stock: Number(data.stock || 0)
           };
           updateMap.set(key, state);
         }
-        if(state.variantStocks && Object.prototype.hasOwnProperty.call(state.variantStocks, selectedVariant)){
-          const current = Number(state.variantStocks[selectedVariant] || 0);
-          if(current < qty) throw new Error("Not enough stock for " + (item.name || "Product") + " - " + selectedVariant);
-          state.variantStocks[selectedVariant] = current - qty;
+        const matchedVariant = findVariantKey(state.variantStocks, selectedVariant);
+        if(matchedVariant !== null){
+          const current = Number(state.variantStocks[matchedVariant] || 0);
+          if(current < qty) throw new Error("Not enough stock for " + (item.name || "Product") + " - " + matchedVariant);
+          state.variantStocks[matchedVariant] = current - qty;
+          state.variantUpdated = true;
+          state.stock = sumVariantStocks(state.variantStocks);
         } else {
           if(state.stock < qty) throw new Error("Not enough stock for " + (item.name || "Product"));
           state.stock -= qty;
@@ -2045,8 +2154,8 @@ async function createPosSale(cart, account={}, payment={}){
       }
 
       updateMap.forEach(state => {
-        if(state.variantStocks) transaction.update(state.ref, { variantStocks:state.variantStocks, stock:sumVariantStocks(state.variantStocks) });
-        else transaction.update(state.ref, { stock:state.stock });
+        if(state.variantUpdated && state.variantStocks) transaction.update(state.ref, { variantStocks:state.variantStocks, stock:sumVariantStocks(state.variantStocks), updatedAt:serverTimestamp() });
+        else transaction.update(state.ref, { stock:state.stock, updatedAt:serverTimestamp() });
       });
       const orderRef = doc(collection(db, "order_history"));
       orderId = orderRef.id;
@@ -2054,19 +2163,21 @@ async function createPosSale(cart, account={}, payment={}){
     });
     return { id:orderId, ...orderPayload, paidAt:new Date().toISOString() };
   }
-  const products = getLocalProducts();
+  const products = getLocalProducts().map(p => ({ ...p, variantStocks: hasVariantStockMap(p.variantStocks) ? { ...p.variantStocks } : (p.variantStocks || {}) }));
   for(const item of stockLines){
     const p = resolveLocalProduct(item, products);
-    if(!p || getVariantStock(p, item.size) < Number(item.qty || 1)) throw new Error("Not enough stock for " + item.name + (item.size ? " - " + item.size : ""));
-  }
-  for(const item of stockLines){
-    const p = resolveLocalProduct(item, products);
-    const map = variantStockMap(p);
-    if(item.size && Object.prototype.hasOwnProperty.call(map, item.size)){
-      p.variantStocks = { ...map, [item.size]: Number(map[item.size] || 0) - Number(item.qty || 1) };
+    if(!p) throw new Error((item.name || "Product") + " not found");
+    const qty = Number(item.qty || 1);
+    const matchedVariant = findVariantKey(p.variantStocks, item.size);
+    if(matchedVariant !== null){
+      const current = Number(p.variantStocks[matchedVariant] || 0);
+      if(current < qty) throw new Error("Not enough stock for " + item.name + " - " + matchedVariant);
+      p.variantStocks[matchedVariant] = current - qty;
       p.stock = sumVariantStocks(p.variantStocks);
     } else {
-      p.stock = Number(p.stock || 0) - Number(item.qty || 1);
+      const current = Number(p.stock || 0);
+      if(current < qty) throw new Error("Not enough stock for " + item.name + (item.size ? " - " + item.size : ""));
+      p.stock = current - qty;
     }
   }
   setLocalProducts(products);
@@ -2115,8 +2226,8 @@ function initAdmin(){
   }
   function updateStats(items){ $("statProducts").textContent = items.length; $("statStock").textContent = items.reduce((a,b)=>a+Number(b.stock||0),0); $("statLow").textContent = items.filter(x=>Number(x.stock||0)<=10).length; $("statCategories").textContent = new Set(items.map(x=>x.category)).size; }
   function clearForm(){ form.reset(); $("docId").value = ""; if($("variants")) $("variants").value = ""; if($("variantImages")) $("variantImages").value = "{}"; if($("image")) $("image").value = ""; window.__pendingProductImages = [""]; setTimeout(() => { window.hydrateVariantRows && window.hydrateVariantRows(null); window.hydrateProductImageRows && window.hydrateProductImageRows([""]); }, 0); }
-  function fillForm(item){ $("docId").value=item.id; $("name").value=item.name||""; $("brand").value=item.brand||""; $("category").value=item.category||"Pods"; $("price").value=item.price||0; if($("costPrice")) $("costPrice").value=item.costPrice||item.cost||0; $("oldPrice").value=item.oldPrice||0; $("stock").value=item.stock||0; $("sold").value=item.sold||""; $("badge").value=item.badge||""; if($("variants")) $("variants").value = Array.isArray(item.variants) ? item.variants.join("\n") : ""; if($("variantImages")) $("variantImages").value = JSON.stringify(item.variantImages || {}); const variantImgs = item.variantImages && typeof item.variantImages === "object" ? Object.values(item.variantImages).filter(Boolean) : []; const allImgs = (Array.isArray(item.images) && item.images.length ? item.images : [item.image]).filter(Boolean); const extraImgs = allImgs.filter(img => !variantImgs.includes(img)); if($("image")) $("image").value = allImgs[0] || ""; window.__pendingProductImages = extraImgs.length ? extraImgs : [""]; setTimeout(() => { window.hydrateVariantRows && window.hydrateVariantRows(item); window.hydrateProductImageRows && window.hydrateProductImageRows(window.__pendingProductImages); }, 0); window.scrollTo({top:0, behavior:"smooth"}); }
-  function renderProductsAdmin(items, source){ $("adminSourceLabel").textContent = source==="firebase" ? "Live from Firebase" : "Using local fallback"; updateStats(items); if(!items.length){ table.innerHTML = '<tr><td colspan="5" class="empty">No products found.</td></tr>'; return; } table.innerHTML = items.map(item => `<tr><td><div style="font-weight:800">${escapeHtml(item.name)}</div><div class="small">${escapeHtml(item.brand)}</div></td><td>${escapeHtml(item.category)}</td><td>${money(item.price)}</td><td>${Number(item.stock||0)}</td><td><div class="row-actions"><button class="btn ghost" data-edit="${item.id}">Edit</button><button class="btn dark" data-delete="${item.id}">Delete</button></div></td></tr>`).join(""); table.querySelectorAll("[data-edit]").forEach(btn => btn.onclick = () => { const item = items.find(x => x.id===btn.dataset.edit); if(item) fillForm(item); }); table.querySelectorAll("[data-delete]").forEach(btn => btn.onclick = async () => { try { await deleteProductItem(btn.dataset.delete); showNotice("Product deleted"); } catch { showNotice("Delete failed"); } }); }
+  function fillForm(item){ $("docId").value=productDocId(item); $("name").value=item.name||""; $("brand").value=item.brand||""; $("category").value=item.category||"Pods"; $("price").value=item.price||0; if($("costPrice")) $("costPrice").value=item.costPrice||item.cost||0; $("oldPrice").value=item.oldPrice||0; $("stock").value=item.stock||0; $("sold").value=item.sold||""; $("badge").value=item.badge||""; if($("variants")) $("variants").value = Array.isArray(item.variants) ? item.variants.join("\n") : ""; if($("variantImages")) $("variantImages").value = JSON.stringify(item.variantImages || {}); const variantImgs = item.variantImages && typeof item.variantImages === "object" ? Object.values(item.variantImages).filter(Boolean) : []; const allImgs = (Array.isArray(item.images) && item.images.length ? item.images : [item.image]).filter(Boolean); const extraImgs = allImgs.filter(img => !variantImgs.includes(img)); if($("image")) $("image").value = allImgs[0] || ""; window.__pendingProductImages = extraImgs.length ? extraImgs : [""]; setTimeout(() => { window.hydrateVariantRows && window.hydrateVariantRows(item); window.hydrateProductImageRows && window.hydrateProductImageRows(window.__pendingProductImages); }, 0); window.scrollTo({top:0, behavior:"smooth"}); }
+  function renderProductsAdmin(items, source){ $("adminSourceLabel").textContent = source==="firebase" ? "Live from Firebase" : "Using local fallback"; updateStats(items); if(!items.length){ table.innerHTML = '<tr><td colspan="5" class="empty">No products found.</td></tr>'; return; } table.innerHTML = items.map(item => `<tr><td><div style="font-weight:800">${escapeHtml(item.name)}</div><div class="small">${escapeHtml(item.brand)}</div></td><td>${escapeHtml(item.category)}</td><td>${money(item.price)}</td><td>${Number(item.stock||0)}</td><td><div class="row-actions"><button class="btn ghost" data-edit="${escapeHtml(productDocId(item))}">Edit</button><button class="btn dark" data-delete="${escapeHtml(productDocId(item))}">Delete</button></div></td></tr>`).join(""); table.querySelectorAll("[data-edit]").forEach(btn => btn.onclick = () => { const item = items.find(x => productDocId(x)===btn.dataset.edit); if(item) fillForm(item); }); table.querySelectorAll("[data-delete]").forEach(btn => btn.onclick = async () => { try { await deleteProductItem(btn.dataset.delete); showNotice("Product deleted"); } catch { showNotice("Delete failed"); } }); }
   function receiptNumber(order){
     if(order && order.receiptNo) return String(order.receiptNo);
     const base = String((order && order.id) || Date.now()).replace(/[^a-zA-Z0-9]/g, "").slice(-7).toUpperCase();
@@ -2224,22 +2335,28 @@ function initAdmin(){
           if(!state){
             state = {
               ref:row.ref,
-              variantStocks:(data.variantStocks && typeof data.variantStocks === "object") ? { ...data.variantStocks } : null,
+              variantStocks: hasVariantStockMap(data.variantStocks) ? { ...data.variantStocks } : null,
+              variantUpdated: false,
               stock:Number(data.stock || 0),
-              hasVariants:Array.isArray(data.variants)
+              hasVariants:Array.isArray(data.variants) && data.variants.length > 0
             };
             updateMap.set(key, state);
           }
-          if(variant && (state.variantStocks || state.hasVariants)){
-            const map = state.variantStocks || {};
-            map[variant] = Number(map[variant] || 0) + qty;
-            state.variantStocks = map;
+          const matchedKey = findVariantKey(state.variantStocks, variant);
+          if(matchedKey !== null){
+            state.variantStocks[matchedKey] = Number(state.variantStocks[matchedKey] || 0) + qty;
+            state.variantUpdated = true;
+            state.stock = sumVariantStocks(state.variantStocks);
+          } else if(state.hasVariants && variant && variant !== "Default" && state.variantStocks){
+            state.variantStocks[variant] = Number(state.variantStocks[variant] || 0) + qty;
+            state.variantUpdated = true;
+            state.stock = sumVariantStocks(state.variantStocks);
           } else {
             state.stock += qty;
           }
         }
         updateMap.forEach(state => {
-          if(state.variantStocks) transaction.update(state.ref, { variantStocks:state.variantStocks, stock:sumVariantStocks(state.variantStocks), updatedAt:serverTimestamp() });
+          if(state.variantUpdated && state.variantStocks) transaction.update(state.ref, { variantStocks:state.variantStocks, stock:sumVariantStocks(state.variantStocks), updatedAt:serverTimestamp() });
           else transaction.update(state.ref, { stock:state.stock, updatedAt:serverTimestamp() });
         });
         const histId = order.firestoreId || order.docId || order.id || orderId;
@@ -2258,7 +2375,7 @@ function initAdmin(){
         const qty = Number(component.qty || item.qty || 1);
         const variant = component.size || component.variant || item.size || item.variant || "Default";
         const map = variantStockMap(p);
-        if(variant && (Object.keys(map).length || Array.isArray(p.variants))){ p.variantStocks = { ...map, [variant]: Number(map[variant] || 0) + qty }; p.stock = sumVariantStocks(p.variantStocks); }
+        const matchedKey = findVariantKey(map, variant); if(matchedKey !== null){ p.variantStocks = { ...map, [matchedKey]: Number(map[matchedKey] || 0) + qty }; p.stock = sumVariantStocks(p.variantStocks); } else if(hasVariantStockMap(map) && Array.isArray(p.variants) && p.variants.length > 0 && variant && variant !== "Default"){ p.variantStocks = { ...map, [variant]: Number(map[variant] || 0) + qty }; p.stock = sumVariantStocks(p.variantStocks); }
         else p.stock = Number(p.stock || 0) + qty;
       });
     });
@@ -2586,7 +2703,7 @@ function initAdmin(){
 
     allOrders.forEach(order => {
       const d = reportOrderDate(order);
-      if(!matchDate(d)) return;
+      if(!d || d.getFullYear() !== year || d.getMonth() !== month) return;
       if(!orderAllowedByReportStatus(order, statusFilter)) return;
       if(commissionIsPaid(order)) return;
       const cashier = getCommissionOrderCashier(order);
@@ -3122,16 +3239,21 @@ function initAdmin(){
     };
     if(cash) cash.addEventListener('input', renderPosCart);
     clearBtn && (clearBtn.onclick = () => { posCart = []; selectedPosProduct = null; selectPosProduct(null); if(scan) scan.value = ""; renderPosSearch(""); renderPosCart(); });
+    let isPosPaying = false;
     payBtn.onclick = async () => {
+      if(isPosPaying) return;
       if(!posCart.length){ showNotice("POS cart is empty"); return; }
       const total = totalAmount(posCart, 0);
       const cashReceived = Number($("posCash")?.value || total);
       const method = $("posPaymentMethod")?.value || "Cash";
       if(method === "Cash" && cashReceived < total){ showNotice("Cash received is lower than total"); return; }
+      isPosPaying = true;
+      payBtn.disabled = true;
       try{
         const order = await createPosSale(posCart, { name:$("posCustomerName")?.value || "Walk-in Customer", phone:$("posCustomerPhone")?.value || "" }, { paymentMethod:method, cashReceived });
         posCart = []; renderPosCart(); if($("posCash")) $("posCash").value = ""; showNotice("Paid. Opening receipt..."); printReceipt(order);
       }catch(error){ showNotice(error.message || "POS payment failed"); }
+      finally{ isPosPaying = false; payBtn.disabled = false; }
     };
     renderPosSearch(""); renderPosCart(); renderPosPromoBundles();
   }
@@ -3210,8 +3332,7 @@ function initAdmin(){
     $("promoForm").setAttribute("novalidate", "novalidate");
     $("promoForm").onsubmit = handlePromoFormSave;
   }
-  const promoSaveBtn = document.querySelector('#promoForm button[type="submit"]');
-  if(promoSaveBtn) promoSaveBtn.addEventListener('click', handlePromoFormSave);
+  // Submit is handled by promoForm.onsubmit (avoids double-firing)
   setPromoDefaultValues();
   if($("clearPromoBtn")) $("clearPromoBtn").onclick = clearPromoForm;
   setupBarcodePos();

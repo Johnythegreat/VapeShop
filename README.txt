@@ -46,3 +46,14 @@ Firebase Authentication > Settings > Authorized domains.
 DEPLOYMENT
 Upload these files to GitHub Pages, Netlify, or your hosting provider.
 After deployment, hard refresh with Ctrl + F5.
+
+LATEST FIXES (INVENTORY & STABILITY UPDATE)
+- Fixed customer checkout inventory deduction in Firebase & Local mode:
+  * Updated firestore.rules so customer orders can safely deduct product stock (stock decrease only, never negative).
+  * IMPORTANT: Copy & publish the updated firestore.rules in Firebase Console -> Firestore Database -> Rules!
+  * Fixed createOrder() and createPosSale() bug where empty/mismatched variantStocks overwrote and discarded stock deductions.
+  * Added productDocId tracking on customer cart items and order lines so Firestore document IDs always match.
+  * Added same-tab localStorage sync so stock updates immediately on the customer and admin pages in Local mode.
+- Fixed buildCommissionReport() crash (undefined matchDate).
+- Fixed cancelAndRestoreOrder() & voidHistorySale() multi-variant aggregation and empty-variants bug.
+- Fixed duplicate event listeners on Promo Save and Inbox button, and added double-click protection on Checkout / POS Pay.
